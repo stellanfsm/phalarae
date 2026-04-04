@@ -35,6 +35,19 @@ export async function updateFirmSettingsAction(firmId: string, formData: FormDat
     else delete next[key];
   }
 
+  // Keep optional public name only when it meaningfully differs from the main name.
+  if (next.displayName?.trim() === name) {
+    delete next.displayName;
+  }
+  // If they renamed the firm, drop a stale branding.displayName that still matches the OLD name
+  // (form default), so the new Firm.name shows on intake. Real overrides differ from both.
+  if (existing.name.trim() !== name.trim()) {
+    const dn = next.displayName?.trim();
+    if (!dn || dn === name || dn === existing.name.trim()) {
+      delete next.displayName;
+    }
+  }
+
   const brandingJson: Prisma.InputJsonValue | typeof Prisma.DbNull =
     Object.keys(next).length > 0 ? (next as Record<string, string>) : Prisma.DbNull;
 

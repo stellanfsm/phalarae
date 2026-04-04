@@ -43,21 +43,32 @@ export function parseFirmBranding(json: unknown): FirmBrandingJson {
 
 /**
  * Single merge point: `config/firm.ts` wins for matching slug; otherwise DB `branding` + `disclaimerOverride`.
+ *
+ * Firm.name is the primary label; optional branding.displayName overrides only when set and
+ * different (see admin save logic clearing stale displayName when the main name changes).
  */
 export function resolveFirmDisplay(firm: Firm): ResolvedFirmDisplay {
   const cfg = getFirmConfigForSlug(firm.slug);
   const b = parseFirmBranding(firm.branding);
 
-  const firmName = cfg?.firmName ?? b.displayName?.trim() ?? firm.name;
-  const primaryColor = cfg?.primaryColor ?? b.primaryColor?.trim() ?? "#1e3a5f";
-  const logoUrl = (cfg?.logoUrl ?? b.logoUrl ?? "").trim();
+  const firmName =
+    cfg?.firmName?.trim() ||
+    b.displayName?.trim() ||
+    firm.name?.trim() ||
+    "Firm";
+  const primaryColor =
+    cfg?.primaryColor?.trim() || b.primaryColor?.trim() || "#1e3a5f";
+  const logoUrl = (cfg?.logoUrl?.trim() || b.logoUrl?.trim() || "").trim();
   const urgentPhoneDisplay =
-    cfg?.urgentPhoneDisplay ?? b.urgentPhoneDisplay?.trim() ?? "(555) 123-4567";
-  const urgentPhoneTel = cfg?.urgentPhoneTel ?? b.urgentPhoneTel?.trim() ?? "+15551234567";
+    cfg?.urgentPhoneDisplay?.trim() ||
+    b.urgentPhoneDisplay?.trim() ||
+    "(555) 123-4567";
+  const urgentPhoneTel =
+    cfg?.urgentPhoneTel?.trim() || b.urgentPhoneTel?.trim() || "+15551234567";
   const disclaimerText =
-    cfg?.disclaimerText?.trim() ?? formatDisclaimerBlock(firm.disclaimerOverride);
+    cfg?.disclaimerText?.trim() || formatDisclaimerBlock(firm.disclaimerOverride);
   const greetingMessage =
-    cfg?.greetingMessage?.trim() ?? b.greetingMessage?.trim() ?? null;
+    cfg?.greetingMessage?.trim() || b.greetingMessage?.trim() || null;
 
   return {
     firmName,

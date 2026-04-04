@@ -87,6 +87,10 @@ export default async function AdminFirmEditPage({ params }: { params: Promise<{ 
             placeholder={firm.name}
             className="mt-1 w-full rounded-md border border-[#d1d5db] px-3 py-2 text-sm"
           />
+          <p className="mt-1 text-xs text-[#94a3b8]">
+            Leave empty to use the main firm name above. Only fill this if visitors should see a shorter
+            name (e.g. “Smith Law” instead of the full legal name).
+          </p>
         </div>
 
         <div>
