@@ -17,11 +17,21 @@ body {
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Iframe /embed: avoid a huge empty gray slab behind the floating launcher */
+/*
+ * Iframe /embed: globals `body { background }` is unlayered and beats Tailwind utilities.
+ * Middleware sets x-phalerae-embed; root layout adds .phalarae-embed on html/body.
+ */
+html.phalerae-embed,
+html.phalerae-embed body {
+  background: transparent !important;
+  min-height: 0 !important;
+}
+
+/* Fallback if middleware/header ever missing */
 html:has(.phalerae-embed-root),
 html:has(.phalerae-embed-root) body {
   background: transparent !important;
-  min-height: 0;
+  min-height: 0 !important;
 }
 
 h1,

@@ -12,19 +12,8 @@ export const metadata: Metadata = {
  */
 export default function EmbedLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      {/* Beat globals.css body background inside iframes (otherwise a tall iframe looks like a grey slab). */}
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-            html, body { background: transparent !important; }
-            body { min-height: 0 !important; }
-          `,
-        }}
-      />
-      <div className="phalerae-embed-root fixed inset-0 isolate overflow-hidden bg-transparent">
-        <div className="h-full min-h-0 w-full bg-transparent">{children}</div>
-      </div>
-    </>
+    <div className="phalerae-embed-root fixed inset-0 isolate overflow-hidden bg-transparent">
+      <div className="h-full min-h-0 w-full bg-transparent">{children}</div>
+    </div>
   );
 }
