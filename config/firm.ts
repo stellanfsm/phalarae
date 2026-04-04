@@ -7,12 +7,13 @@
  *    (seed default is `demo` in prisma/seed.ts). Change the seed if you rename the slug.
  * 3. Restart the dev server or redeploy so changes load.
  *
- * MVP: Only this slug uses this config for branding + copy + lead email routing.
- * Other Firm rows in the DB keep using DB fields only.
+ * MVP: Only when `intakeSlug` is non-empty and matches a Firm.slug does this file
+ * override Admin/DB branding. Leave `intakeSlug` empty so **Admin → Firms** controls
+ * the widget (recommended for production and clients).
  */
 
 export type FirmDemoConfig = {
-  /** Must match /intake/[slug] and Firm.slug in the database */
+  /** Must match /intake/[slug] and Firm.slug. Empty string = disabled (DB only). */
   intakeSlug: string;
   /** Shown in header, completion message, and emails */
   firmName: string;
@@ -33,7 +34,8 @@ export type FirmDemoConfig = {
 };
 
 export const firmDemoConfig: FirmDemoConfig = {
-  intakeSlug: "demo",
+  /** Empty = do not override DB. Set to e.g. "demo" only for a code-based pilot. */
+  intakeSlug: "",
   firmName: "",
   logoUrl: "https://www.sewelllawfirm.com/wp-content/themes/sewelllawfirm/images/logo.webp",
   primaryColor: "#9E1D20",
@@ -54,6 +56,8 @@ export const firmDemoConfig: FirmDemoConfig = {
 };
 
 export function getFirmConfigForSlug(slug: string): FirmDemoConfig | null {
-  if (slug === firmDemoConfig.intakeSlug) return firmDemoConfig;
+  const key = firmDemoConfig.intakeSlug.trim();
+  if (!key) return null;
+  if (slug === key) return firmDemoConfig;
   return null;
 }
