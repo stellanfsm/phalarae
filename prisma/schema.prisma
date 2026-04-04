@@ -1,0 +1,82 @@
+// Phalarae — multi-tenant-ready schema (MVP: single firm via seed)
+
+// Custom output avoids Windows EPERM on rename under node_modules/.prisma (Defender / OneDrive).
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Firm {
+  id                   String          @id @default(cuid())
+  name                 String
+  slug                 String          @unique
+  /// JSON: { primaryColor?: string, logoUrl?: string, displayName?: string }
+  branding             Json?
+  /// When null, app uses built-in default disclaimer copy
+  disclaimerOverride   String?         @db.Text
+  /// JSON: future per-firm question overrides (MVP: null = defaults)
+  intakeConfig         Json?
+  /// Receives new-lead email alerts (falls back to env in MVP)
+  notificationEmail    String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  leads                Lead[]
+  intakeSessions       IntakeSession[]
+  adminUsers           AdminUser[]
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  /// null = operator can see all firms (MVP has one firm)
+  firmId       String?
+  firm         Firm?    @relation(fields: [firmId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+}
+
+model IntakeSession {
+  id          String          @id @default(cuid())
+  firmId      String
+  firm        Firm            @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  /// Current step id from lib/intake-steps.ts
+  currentStep String
+  /// Partial IntakePayload as JSON while in progress
+  data        Json            @default("{}")
+  completedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  messages    IntakeMessage[]
+  lead        Lead?
+}
+
+model IntakeMessage {
+  id        String        @id @default(cuid())
+  sessionId String
+  session   IntakeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String        @db.Text
+  /// Optional structured metadata (e.g. step id)
+  meta      Json?
+  createdAt DateTime      @default(now())
+}
+
+model Lead {
+  id                 String        @id @default(cuid())
+  firmId             String
+  firm               Firm          @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  intakeSessionId    String        @unique
+  intakeSession      IntakeSession @relation(fields: [intakeSessionId], references: [id], onDelete: Cascade)
+  qualificationTag   String
+  summaryJson        Json
+  humanSummary       String        @db.Text
+  contactName        String?
+  contactEmail       String?
+  contactPhone       String?
+  createdAt          DateTime      @default(now())
+}
