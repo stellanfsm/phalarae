@@ -44,7 +44,7 @@ export function IntakeEmbedWidget(props: IntakeEmbedWidgetProps) {
   }
 
   return (
-    <div className="relative h-full w-full min-h-0 overflow-hidden font-[family-name:var(--font-body)]">
+    <div className="relative h-full w-full min-h-0 overflow-hidden bg-transparent font-[family-name:var(--font-body)]">
       {!open ? (
         <div className="absolute bottom-0 right-0 z-[1] p-3 sm:p-4">
           <button

@@ -17,6 +17,13 @@ body {
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Iframe /embed: avoid a huge empty gray slab behind the floating launcher */
+html:has(.phalerae-embed-root),
+html:has(.phalerae-embed-root) body {
+  background: transparent !important;
+  min-height: 0;
+}
+
 h1,
 h2,
 h3 {
