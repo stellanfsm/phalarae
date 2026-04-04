@@ -39,6 +39,8 @@ export function IntakeClient({
   const [progress, setProgress] = useState<{ step: number; total: number } | null>(null);
   const [progressHints, setProgressHints] = useState<string[]>([]);
   const [showNotice, setShowNotice] = useState(false);
+  /** Bump to re-run start (e.g. after a failed request). */
+  const [sessionStartKey, setSessionStartKey] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -51,22 +53,39 @@ export function IntakeClient({
 
   useEffect(() => {
     let cancelled = false;
+    setSessionId(null);
+    setMessages([]);
+    setDisclaimerAcknowledged(false);
+    setDone(false);
+    setLeadId(null);
+    setProgress(null);
+    setProgressHints([]);
+    setLoading(true);
+    setError(null);
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
         const res = await fetch("/api/intake", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "start", firmSlug }),
         });
-        const j = (await res.json()) as {
+        const raw = await res.text();
+        let j: {
           sessionId?: string;
           messages?: Msg[];
           progress?: { step: number; total: number } | null;
           progressHints?: string[];
           error?: string;
         };
+        try {
+          j = JSON.parse(raw) as typeof j;
+        } catch {
+          throw new Error(
+            res.ok
+              ? "Unexpected response from server."
+              : `Server error (${res.status}). Try again in a moment.`,
+          );
+        }
         if (!res.ok) throw new Error(j.error ?? "Could not start session");
         if (cancelled) return;
         setSessionId(j.sessionId ?? null);
@@ -82,7 +101,11 @@ export function IntakeClient({
     return () => {
       cancelled = true;
     };
-  }, [firmSlug]);
+  }, [firmSlug, sessionStartKey]);
+
+  function retryStart() {
+    setSessionStartKey((k) => k + 1);
+  }
 
   async function acknowledge() {
     if (!sessionId) return;
@@ -208,6 +231,20 @@ export function IntakeClient({
         </div>
       ) : null}
 
+      {error && !disclaimerAcknowledged ? (
+        <div className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-900">
+          <p className="font-medium">Intake couldn’t start</p>
+          <p className="mt-1 text-red-800">{error}</p>
+          <button
+            type="button"
+            onClick={() => retryStart()}
+            className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-900 hover:bg-red-100"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex min-h-0 flex-1 flex-col">
         <div
           className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 ${
@@ -216,6 +253,14 @@ export function IntakeClient({
         >
           {loading && messages.length === 0 ? (
             <p className="text-sm text-[#64748b]">Starting secure session…</p>
+          ) : null}
+          {!loading && !sessionId && messages.length === 0 && !error ? (
+            <p className="text-sm text-[#64748b]">
+              No session loaded.{" "}
+              <button type="button" className="font-medium text-[#0f172a] underline" onClick={() => retryStart()}>
+                Retry
+              </button>
+            </p>
           ) : null}
           {messages.map((m, i) => (
             <div
