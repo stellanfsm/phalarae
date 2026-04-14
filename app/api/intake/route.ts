@@ -400,19 +400,11 @@ export async function POST(req: Request) {
       });
     }
 
-    await prisma.intakeSession.update({
-      where: { id: session.id },
-      data: {
-        data: mergeSessionStoredData(nextData, sessionMeta) as object,
-        currentStep: nextStep,
-        completedAt: nextStep === "complete" ? new Date() : null,
-      },
-    });
-
     let leadId: string | undefined;
     let submission: { urgentSelfReported: boolean } | undefined;
 
     if (nextStep === "complete") {
+      // Pure computation first — if any of this throws the session has not been sealed yet.
       const full = intakePayloadSchema.parse(nextData);
       submission = { urgentSelfReported: full.urgent === "yes" };
       const intakeQuality =
@@ -432,19 +424,37 @@ export async function POST(req: Request) {
       const humanSummary = buildHumanSummary(full, tag, now, intakeQuality);
       const briefParagraph = buildIntakeBriefParagraph(full, tag);
       const resolved = resolveFirmDisplay(session.firm);
-
-      const lead = await prisma.lead.create({
-        data: {
-          firmId: session.firmId,
-          intakeSessionId: session.id,
-          qualificationTag: tag,
-          summaryJson: summaryJson as Prisma.InputJsonValue,
-          humanSummary,
-          contactName: full.fullName,
-          contactEmail: full.email,
-          contactPhone: full.phone,
-        },
+      const closing = closingMessageForFirm(session.firm, {
+        urgentYes: full.urgent === "yes",
       });
+
+      // Atomic: session seal + lead row + closing message commit together or not at all.
+      // This prevents a zombie sealed session with no Lead if any write fails.
+      const [, lead] = await prisma.$transaction([
+        prisma.intakeSession.update({
+          where: { id: session.id },
+          data: {
+            data: mergeSessionStoredData(nextData, sessionMeta) as object,
+            currentStep: "complete",
+            completedAt: now,
+          },
+        }),
+        prisma.lead.create({
+          data: {
+            firmId: session.firmId,
+            intakeSessionId: session.id,
+            qualificationTag: tag,
+            summaryJson: summaryJson as Prisma.InputJsonValue,
+            humanSummary,
+            contactName: full.fullName,
+            contactEmail: full.email,
+            contactPhone: full.phone,
+          },
+        }),
+        prisma.intakeMessage.create({
+          data: { sessionId: session.id, role: "assistant", content: closing },
+        }),
+      ]);
       leadId = lead.id;
 
       const to =
@@ -462,13 +472,14 @@ export async function POST(req: Request) {
           humanSummary,
         });
       }
-
-      const closing = closingMessageForFirm(session.firm, {
-        urgentYes: full.urgent === "yes",
-      });
-
-      await prisma.intakeMessage.create({
-        data: { sessionId: session.id, role: "assistant", content: closing },
+    } else {
+      await prisma.intakeSession.update({
+        where: { id: session.id },
+        data: {
+          data: mergeSessionStoredData(nextData, sessionMeta) as object,
+          currentStep: nextStep,
+          completedAt: null,
+        },
       });
     }
 
