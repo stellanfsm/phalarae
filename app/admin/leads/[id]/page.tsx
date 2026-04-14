@@ -32,6 +32,24 @@ function tagLabel(tag: string): string {
   }
 }
 
+function alertStatusStyle(status: string): string {
+  switch (status) {
+    case "sent": return "bg-emerald-50 text-emerald-900 ring-emerald-200";
+    case "failed": return "bg-red-50 text-red-900 ring-red-200";
+    case "no_recipient": return "bg-slate-100 text-slate-600 ring-slate-200";
+    default: return "bg-slate-50 text-slate-600 ring-slate-200";
+  }
+}
+
+function alertStatusLabel(status: string): string {
+  switch (status) {
+    case "sent": return "Alert sent";
+    case "failed": return "Alert failed";
+    case "no_recipient": return "No recipient configured";
+    default: return status;
+  }
+}
+
 export default async function AdminLeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const op = await getAdminOperator();
@@ -75,6 +93,19 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
           {brief}
         </p>
       ) : null}
+
+      <div className="mt-3 flex items-center gap-2">
+        <span
+          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${alertStatusStyle(lead.alertStatus)}`}
+        >
+          {alertStatusLabel(lead.alertStatus)}
+        </span>
+        {lead.alertError ? (
+          <span className="text-xs text-[#94a3b8]" title={lead.alertError}>
+            {lead.alertError.length > 120 ? lead.alertError.slice(0, 120) + "…" : lead.alertError}
+          </span>
+        ) : null}
+      </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">

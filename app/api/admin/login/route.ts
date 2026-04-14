@@ -3,6 +3,7 @@ import { compare } from "bcryptjs";
 import { z } from "zod";
 import { adminCookieOptions, signAdminToken, ADMIN_COOKIE_NAME } from "@/lib/admin-token";
 import { prisma } from "@/lib/prisma";
+import { clientIp, checkAdminLogin } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   email: z.string().email(),
@@ -12,6 +13,12 @@ const bodySchema = z.object({
 const MAX_AGE_SEC = 60 * 60 * 12;
 
 export async function POST(req: Request) {
+  const ip = clientIp(req.headers);
+  const rl = await checkAdminLogin(ip);
+  if (!rl.ok) {
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+  }
+
   let json: unknown;
   try {
     json = await req.json();

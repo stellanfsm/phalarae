@@ -22,7 +22,7 @@ import type { ParsedFieldUpdate } from "@/lib/intake-parse-field";
 import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { qualifyIntake } from "@/lib/qualify";
-import { clientIp, checkRateLimit } from "@/lib/rate-limit";
+import { clientIp, checkIntakeStart, checkIntakeAcknowledge, checkIntakeMessage } from "@/lib/rate-limit";
 import { intakePayloadSchema, type IntakePayload } from "@/lib/schemas/intake-data";
 import { getFirmConfigForSlug } from "@/config/firm";
 import type { Firm } from "@/app/generated/prisma/client";
@@ -93,27 +93,13 @@ const bodySchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-const WINDOW_MS = 60_000;
-const MAX_REQ = Number(process.env.INTAKE_RATE_LIMIT_PER_MIN ?? 30);
-
 function rateLimitHeaders(retryAfter?: number): HeadersInit {
-  const h: Record<string, string> = {
-    "X-RateLimit-Limit": String(MAX_REQ),
-    "X-RateLimit-Window": String(WINDOW_MS / 1000),
-  };
-  if (retryAfter != null) h["Retry-After"] = String(retryAfter);
-  return h;
+  if (retryAfter != null) return { "Retry-After": String(retryAfter) };
+  return {};
 }
 
 export async function POST(req: Request) {
   const ip = clientIp(req.headers);
-  const rl = checkRateLimit(`intake:${ip}`, MAX_REQ, WINDOW_MS);
-  if (!rl.ok) {
-    return NextResponse.json(
-      { error: "Too many requests" },
-      { status: 429, headers: rateLimitHeaders(rl.retryAfterSec) },
-    );
-  }
 
   let json: unknown;
   try {
@@ -128,6 +114,21 @@ export async function POST(req: Request) {
   }
 
   const body = parsed.data;
+
+  let rl;
+  if (body.action === "start") {
+    rl = await checkIntakeStart(ip);
+  } else if (body.action === "acknowledge_disclaimer") {
+    rl = await checkIntakeAcknowledge(ip);
+  } else {
+    rl = await checkIntakeMessage(ip, body.sessionId);
+  }
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "rate_limited" },
+      { status: 429, headers: rateLimitHeaders(rl.retryAfterSec) },
+    );
+  }
 
   try {
     if (body.action === "start") {
@@ -462,15 +463,35 @@ export async function POST(req: Request) {
         process.env.LEAD_ALERT_EMAIL?.trim() ||
         null;
 
+      let alertStatus = "no_recipient";
+      let alertError: string | undefined;
+
       if (to) {
-        await sendNewLeadAlert({
-          to,
-          firmName: resolved.firmName,
-          contactName: full.fullName,
-          qualificationTag: tag,
-          briefParagraph,
-          humanSummary,
+        try {
+          const emailResult = await sendNewLeadAlert({
+            to,
+            firmName: resolved.firmName,
+            contactName: full.fullName,
+            qualificationTag: tag,
+            briefParagraph,
+            humanSummary,
+          });
+          alertStatus = emailResult.sent ? "sent" : "failed";
+          alertError = emailResult.error;
+        } catch (e) {
+          alertStatus = "failed";
+          alertError = e instanceof Error ? e.message : String(e);
+          console.error("[email] sendNewLeadAlert threw unexpectedly for lead", lead.id, e);
+        }
+      }
+
+      try {
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { alertStatus, alertError: alertError ?? null },
         });
+      } catch (e) {
+        console.error("[email] failed to persist alertStatus for lead", lead.id, e);
       }
     } else {
       await prisma.intakeSession.update({

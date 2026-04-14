@@ -78,5 +78,9 @@ model Lead {
   contactName        String?
   contactEmail       String?
   contactPhone       String?
+  /// sent | failed | no_recipient
+  alertStatus        String        @default("no_recipient")
+  /// Provider error message when alertStatus = "failed"
+  alertError         String?       @db.Text
   createdAt          DateTime      @default(now())
 }
