@@ -60,6 +60,38 @@ function briefForLead(summaryJson: unknown, humanSummary: string): string {
   return humanSummary.split("\n").find((l) => l.includes("Narrative:"))?.replace(/^.*Narrative:\s*/, "").slice(0, 220) ?? "—";
 }
 
+function pilotSummary(
+  sessLast7: number,
+  compLast7: number,
+  compPrev7: number,
+  relLast7: number,
+): string {
+  if (sessLast7 === 0 && compLast7 === 0) {
+    return "No intake sessions were started in the last 7 days.";
+  }
+  if (compLast7 === 0) {
+    const s = sessLast7 === 1 ? "session" : "sessions";
+    return `In the last 7 days, ${sessLast7} intake ${s} started but none completed.`;
+  }
+  const sub = compLast7 === 1 ? "submission" : "submissions";
+  const flagPart =
+    relLast7 === 0
+      ? ", none automatically flagged for follow-up based on intake responses"
+      : relLast7 === 1
+      ? ", with 1 automatically flagged for follow-up based on intake responses"
+      : `, with ${relLast7} automatically flagged for follow-up based on intake responses`;
+  const delta = compLast7 - compPrev7;
+  const trendPart =
+    compPrev7 === 0 && compLast7 > 0
+      ? " Up from none the previous week."
+      : delta > 0
+      ? ` Up ${delta} from the previous week.`
+      : delta < 0
+      ? ` Down ${Math.abs(delta)} from the previous week.`
+      : " Consistent with the previous week.";
+  return `Over the last 7 days, your intake captured ${compLast7} completed ${sub}${flagPart}.${trendPart}`;
+}
+
 function trend(cur: number, prev: number): { label: string; color: string } {
   const d = cur - prev;
   if (d === 0) return { label: "same as prior 7 days", color: "text-[#94a3b8]" };
@@ -159,10 +191,35 @@ export default async function AdminLeadsPage() {
     prisma.lead.count({ where: { ...fw, qualificationTag: "likely_relevant", createdAt: { gte: cut7 } } }),
     prisma.lead.count({ where: { ...fw, qualificationTag: "likely_relevant", createdAt: { gte: cut14, lt: cut7 } } }),
   ]);
+  const compRate7 = sessLast7 === 0 ? null : Math.round((compLast7 / sessLast7) * 100);
+  const summaryText = pilotSummary(sessLast7, compLast7, compPrev7, relLast7);
 
   return (
     <div>
-      <h1 className="font-serif text-2xl font-semibold text-[#0f172a]">Leads</h1>
+      <div className="rounded-xl border border-[#e2e0d9] bg-white p-5 shadow-sm">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Snapshot · last 7 days</span>
+        <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-[#334155]">{summaryText}</p>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {([
+            { label: "Completed intakes", value: compLast7, trendInfo: trend(compLast7, compPrev7) },
+            { label: "Likely-relevant leads", value: relLast7, trendInfo: trend(relLast7, relPrev7) },
+            { label: "Completion rate", value: compRate7 === null ? "\u2014" : `${compRate7}%`, trendInfo: null as { label: string; color: string } | null },
+            { label: "Sessions started", value: sessLast7, trendInfo: trend(sessLast7, sessPrev7) },
+          ]).map(({ label, value, trendInfo }) => (
+            <div key={label} className="rounded-lg border border-[#e2e0d9] bg-[#fafaf8] p-3">
+              <div className="text-xl font-semibold text-[#0f172a]">{value}</div>
+              <div className="mt-0.5 text-xs font-medium text-[#64748b]">{label}</div>
+              {trendInfo ? (
+                <div className={`mt-0.5 text-xs ${trendInfo.color}`}>{trendInfo.label}</div>
+              ) : (
+                <div className="mt-0.5 text-xs text-[#94a3b8]">last 7 days</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <h1 className="mt-6 font-serif text-2xl font-semibold text-[#0f172a]">Leads</h1>
       <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#64748b]">
         Recent submissions. Tags are automated routing hints only — not legal conclusions. Edit rules in{" "}
         <code className="rounded bg-[#f1f5f9] px-1 font-mono text-xs">lib/qualify.ts</code>.
