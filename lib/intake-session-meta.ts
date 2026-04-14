@@ -84,12 +84,13 @@ export function mergeSessionStoredData(
 
 export const MAX_CLARIFY_ROUNDS_BEFORE_FORCE = 3;
 
-/** Fields that support force-accept after max clarification rounds. */
+/**
+ * Fields that support force-accept after max clarification rounds.
+ * email and phone are excluded: their Zod schemas require specific formats
+ * (valid email address, ≥10 digit phone), so a force-accepted raw string would
+ * fail intakePayloadSchema.parse() at completion. For those fields, continued
+ * clarification is the only path — a lead without contact info cannot be followed up.
+ */
 export function fieldSupportsForceAccept(key: FlowStepKey): boolean {
-  return (
-    key === "description" ||
-    key === "incidentDate" ||
-    key === "incidentLocation" ||
-    key === "fullName"
-  );
+  return key !== "email" && key !== "phone";
 }

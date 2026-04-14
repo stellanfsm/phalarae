@@ -22,6 +22,19 @@ export function buildForceAcceptedValue(key: FlowStepKey, raw: string): unknown 
       if (t.length >= 2) return t.slice(0, 200);
       return `Review: ${t || "name"}`.slice(0, 200);
     }
+    case "injuries":
+    case "medicalTreatment":
+    case "otherPartyFault":
+    case "policeReport":
+    case "hasAttorney":
+    case "urgent":
+      return "unclear";
+    case "incidentType":
+      return "other";
+    case "motorVehicleInvolvement":
+      return "unclear";
+    case "preferredContact":
+      return "either";
     default:
       return t;
   }

@@ -196,7 +196,7 @@ export async function interpretIntakeTurn(params: {
       messages,
       response_format: { type: "json_object" },
       temperature: 0.15,
-    });
+    }, { signal: AbortSignal.timeout(8000) });
     const raw = completion.choices[0]?.message?.content;
     if (raw) {
       const parsed = multiResponseSchema.parse(JSON.parse(raw));
@@ -216,7 +216,8 @@ export async function interpretIntakeTurn(params: {
       }
       llmUpdates = llmExtractionsToUpdates(parsed.extractions);
     }
-  } catch {
+  } catch (e) {
+    console.warn("[openai] interpretIntakeTurn failed, falling back to deterministic extraction:", e);
     llmUpdates = [];
   }
 

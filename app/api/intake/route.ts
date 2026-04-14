@@ -72,11 +72,12 @@ function closingMessageForFirm(firm: Firm, opts: { urgentYes: boolean }): string
     `A member of ${firmName} will review your case and contact you shortly.`,
   ];
   if (opts.urgentYes) {
-    lines.push(
-      "",
-      `Because you indicated this may be urgent, we recommend calling the office directly: ${urgentPhoneDisplay}.`,
-    );
-  } else {
+    if (urgentPhoneDisplay) {
+      lines.push("", `Because you indicated this may be urgent, we recommend calling the office directly: ${urgentPhoneDisplay}.`);
+    } else {
+      lines.push("", "Because you indicated this may be urgent, please contact the office as soon as possible.");
+    }
+  } else if (urgentPhoneDisplay) {
     lines.push("", `To reach the office: ${urgentPhoneDisplay}.`);
   }
   lines.push("", "Not legal advice. Emergencies: call 911.");
@@ -125,7 +126,7 @@ export async function POST(req: Request) {
   }
   if (!rl.ok) {
     return NextResponse.json(
-      { error: "rate_limited" },
+      { error: "You've sent too many messages. Please wait a moment and try again." },
       { status: 429, headers: rateLimitHeaders(rl.retryAfterSec) },
     );
   }

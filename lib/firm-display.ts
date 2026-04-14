@@ -62,9 +62,9 @@ export function resolveFirmDisplay(firm: Firm): ResolvedFirmDisplay {
   const urgentPhoneDisplay =
     cfg?.urgentPhoneDisplay?.trim() ||
     b.urgentPhoneDisplay?.trim() ||
-    "(555) 123-4567";
+    "";
   const urgentPhoneTel =
-    cfg?.urgentPhoneTel?.trim() || b.urgentPhoneTel?.trim() || "+15551234567";
+    cfg?.urgentPhoneTel?.trim() || b.urgentPhoneTel?.trim() || "";
   const disclaimerText =
     cfg?.disclaimerText?.trim() || formatDisclaimerBlock(firm.disclaimerOverride);
   const greetingMessage =

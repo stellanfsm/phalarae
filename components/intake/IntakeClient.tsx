@@ -139,7 +139,6 @@ export function IntakeClient({
     e.preventDefault();
     if (!sessionId || !input.trim() || loading || done || !disclaimerAcknowledged) return;
     const text = input.trim();
-    setInput("");
     setLoading(true);
     setError(null);
     try {
@@ -158,6 +157,7 @@ export function IntakeClient({
         error?: string;
       };
       if (!res.ok) throw new Error(j.error ?? "Could not send");
+      setInput("");
       setMessages(j.messages ?? []);
       if (j.progress) setProgress(j.progress);
       setProgressHints(Array.isArray(j.progressHints) ? j.progressHints : []);
@@ -268,7 +268,7 @@ export function IntakeClient({
               className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[88%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed sm:text-sm ${
+                className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed sm:text-sm ${
                   m.role === "user"
                     ? "text-white shadow-sm"
                     : "bg-[#f8f9fa] text-[#0f172a] ring-1 ring-[#e8eaed]"
@@ -286,6 +286,17 @@ export function IntakeClient({
               </div>
             </div>
           ))}
+          {loading && messages.length > 0 ? (
+            <div className="flex justify-start">
+              <div className="rounded-2xl bg-[#f8f9fa] px-4 py-3 ring-1 ring-[#e8eaed]">
+                <span className="inline-flex items-center gap-1" aria-label="Thinking">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#94a3b8]" style={{ animationDelay: "0ms" }} />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#94a3b8]" style={{ animationDelay: "150ms" }} />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#94a3b8]" style={{ animationDelay: "300ms" }} />
+                </span>
+              </div>
+            </div>
+          ) : null}
           <div ref={bottomRef} />
         </div>
 
@@ -350,17 +361,22 @@ export function IntakeClient({
             {urgentSelfReported ? (
               <p className="mt-4 text-[#334155]">
                 <span className="font-medium text-[#0f172a]">
-                  Because you indicated this may be urgent, call the office now:
-                </span>{" "}
-                <a
-                  href={`tel:${urgentPhoneTel}`}
-                  className="font-semibold underline decoration-2 underline-offset-2"
-                  style={{ color: primaryColor }}
-                >
-                  {urgentPhoneDisplay}
-                </a>
+                  Because you indicated this may be urgent, please contact the office directly.
+                </span>
+                {urgentPhoneDisplay ? (
+                  <>
+                    {" "}
+                    <a
+                      href={`tel:${urgentPhoneTel}`}
+                      className="font-semibold underline decoration-2 underline-offset-2"
+                      style={{ color: primaryColor }}
+                    >
+                      {urgentPhoneDisplay}
+                    </a>
+                  </>
+                ) : null}
               </p>
-            ) : (
+            ) : urgentPhoneDisplay ? (
               <p className="mt-4 text-[#334155]">
                 <span className="font-medium text-[#0f172a]">Need to reach us sooner?</span>{" "}
                 <a
@@ -371,7 +387,7 @@ export function IntakeClient({
                   {urgentPhoneDisplay}
                 </a>
               </p>
-            )}
+            ) : null}
             <p className="mt-3 text-xs text-[#64748b]">
               Reference: <span className="font-mono text-[11px] text-[#475569]">{leadId}</span>
             </p>

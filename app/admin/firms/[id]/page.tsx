@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { getAdminOperator } from "@/lib/admin-operator";
 import { parseFirmBranding } from "@/lib/firm-display";
 import { updateFirmSettingsAction } from "../actions";
+import { CopyButton } from "@/components/admin/CopyButton";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,11 @@ export default async function AdminFirmEditPage({ params }: { params: Promise<{ 
 
   const firm = await prisma.firm.findUnique({ where: { id } });
   if (!firm) notFound();
+
+  const hdrs = await headers();
+  const proto = hdrs.get("x-forwarded-proto") ?? "https";
+  const host = hdrs.get("host") ?? "YOUR_DOMAIN";
+  const baseUrl = `${proto}://${host}`;
 
   const b = parseFirmBranding(firm.branding);
   const boundUpdate = updateFirmSettingsAction.bind(null, firm.id);
@@ -190,6 +197,43 @@ export default async function AdminFirmEditPage({ params }: { params: Promise<{ 
           Save settings
         </button>
       </form>
+
+      <div className="mt-8 max-w-xl rounded-lg border border-[#e2e0d9] bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-[#64748b]">Embed snippets</h2>
+        <p className="mt-1 text-xs text-[#94a3b8]">
+          Paste one of these into any webpage to add the intake widget.
+        </p>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <p className="text-xs font-medium text-[#475569]">Floating launcher (chat bubble)</p>
+            <p className="mt-0.5 text-xs text-[#94a3b8]">Appears as a button in the corner of your page.</p>
+            <div className="mt-2 flex items-start gap-2">
+              <pre className="flex-1 overflow-x-auto rounded-md bg-[#0f172a] p-3 font-mono text-[11px] leading-relaxed text-[#e2e8f0]">{`<iframe
+  src="${baseUrl}/embed?slug=${firm.slug}"
+  style="position:fixed;bottom:24px;right:24px;width:420px;height:600px;border:none;z-index:9999;"
+  title="Contact us"
+></iframe>`}</pre>
+              <CopyButton text={`<iframe\n  src="${baseUrl}/embed?slug=${firm.slug}"\n  style="position:fixed;bottom:24px;right:24px;width:420px;height:600px;border:none;z-index:9999;"\n  title="Contact us"\n></iframe>`} />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-[#475569]">Inline block (embedded in page)</p>
+            <p className="mt-0.5 text-xs text-[#94a3b8]">Renders as a fixed-height block inside your page layout.</p>
+            <div className="mt-2 flex items-start gap-2">
+              <pre className="flex-1 overflow-x-auto rounded-md bg-[#0f172a] p-3 font-mono text-[11px] leading-relaxed text-[#e2e8f0]">{`<iframe
+  src="${baseUrl}/embed?slug=${firm.slug}&inline=1"
+  width="100%"
+  height="640"
+  style="border:none;"
+  title="Contact us"
+></iframe>`}</pre>
+              <CopyButton text={`<iframe\n  src="${baseUrl}/embed?slug=${firm.slug}&inline=1"\n  width="100%"\n  height="640"\n  style="border:none;"\n  title="Contact us"\n></iframe>`} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
