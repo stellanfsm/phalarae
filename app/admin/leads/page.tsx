@@ -101,6 +101,28 @@ function trend(cur: number, prev: number): { label: string; color: string } {
   };
 }
 
+const STEP_LABEL: Record<string, string> = {
+  fullName: "Full name",
+  email: "Email",
+  phone: "Phone",
+  preferredContact: "Preferred contact",
+  incidentType: "Incident type",
+  motorVehicleInvolvement: "Vehicles involved",
+  incidentDate: "Incident date",
+  incidentLocation: "Incident location",
+  description: "Description",
+  injuries: "Injuries",
+  medicalTreatment: "Medical treatment",
+  otherPartyFault: "Other-party fault",
+  policeReport: "Police report",
+  hasAttorney: "Has attorney",
+  urgent: "Urgency",
+};
+
+function stepLabel(key: string): string {
+  return STEP_LABEL[key] ?? key;
+}
+
 type SessionRow = { currentStep: string; completedAt: Date | null; data: unknown };
 
 function computeFunnelStats(sessions: SessionRow[]): {
@@ -221,8 +243,7 @@ export default async function AdminLeadsPage() {
 
       <h1 className="mt-6 font-serif text-2xl font-semibold text-[#0f172a]">Leads</h1>
       <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#64748b]">
-        Recent submissions. Tags are automated routing hints only — not legal conclusions. Edit rules in{" "}
-        <code className="rounded bg-[#f1f5f9] px-1 font-mono text-xs">lib/qualify.ts</code>.
+        Recent submissions. Tags are automated routing hints only — not legal conclusions.
       </p>
 
       <div className="mt-6">
@@ -276,7 +297,7 @@ export default async function AdminLeadsPage() {
                 <tbody className="divide-y divide-[#f1f0eb]">
                   {funnel.dropoffByStep.map(({ step, count }) => (
                     <tr key={step} className="hover:bg-[#fafaf8]">
-                      <td className="px-4 py-2 font-mono text-xs text-[#334155]">{step}</td>
+                      <td className="px-4 py-2 text-sm text-[#334155]">{stepLabel(step)}</td>
                       <td className="px-4 py-2 text-right text-[#475569]">{count}</td>
                     </tr>
                   ))}
@@ -299,7 +320,7 @@ export default async function AdminLeadsPage() {
                 <tbody className="divide-y divide-[#f1f0eb]">
                   {funnel.clarifyTotals.map(({ field, rounds }) => (
                     <tr key={field} className="hover:bg-[#fafaf8]">
-                      <td className="px-4 py-2 font-mono text-xs text-[#334155]">{field}</td>
+                      <td className="px-4 py-2 text-sm text-[#334155]">{stepLabel(field)}</td>
                       <td className="px-4 py-2 text-right text-[#475569]">{rounds}</td>
                     </tr>
                   ))}
@@ -363,7 +384,7 @@ export default async function AdminLeadsPage() {
                   return (
                     <tr key={lead.id} className="hover:bg-[#fafaf8]">
                       <td className="whitespace-nowrap px-4 py-3 text-[#475569]">
-                        {lead.createdAt.toLocaleString()}
+                        {lead.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
                       </td>
                       <td className="px-4 py-3 font-medium text-[#0f172a]">
                         <Link className="hover:underline" href={`/admin/leads/${lead.id}`}>
