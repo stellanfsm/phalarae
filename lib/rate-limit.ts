@@ -38,6 +38,7 @@ function getRedis(): Redis | null {
     const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
     const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
     _redis = url && token ? new Redis({ url, token }) : null;
+    if (!_redis) console.warn("[rate-limit] Upstash not configured — rate limiting is disabled");
   }
   return _redis;
 }

@@ -24,6 +24,7 @@ export default async function IntakePage({ params }: { params: Promise<{ slug: s
     throw new Error(`Database connection failed.${hint}${devTail}`);
   }
   if (!firm) notFound();
+  if (firm.status !== "active") notFound();
 
   const r = resolveFirmDisplay(firm);
 

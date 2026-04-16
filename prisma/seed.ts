@@ -18,9 +18,11 @@ async function main() {
         displayName: "Demo Injury Law",
       },
       notificationEmail: process.env.LEAD_ALERT_EMAIL?.trim() || null,
+      status: "active",
     },
     update: {
       notificationEmail: process.env.LEAD_ALERT_EMAIL?.trim() || undefined,
+      status: "active",
     },
   });
 
@@ -29,13 +31,26 @@ async function main() {
     create: {
       email: "admin@phalerae.local",
       passwordHash,
+      role: "firm_admin",
       firmId: firm.id,
     },
-    update: { passwordHash, firmId: firm.id },
+    update: { passwordHash, role: "firm_admin", firmId: firm.id },
+  });
+
+  await prisma.adminUser.upsert({
+    where: { email: "operator@phalerae.local" },
+    create: {
+      email: "operator@phalerae.local",
+      passwordHash,
+      role: "operator",
+      firmId: null,
+    },
+    update: { passwordHash, role: "operator" },
   });
 
   console.log("Seed complete. Firm slug: demo");
-  console.log("Admin login: admin@phalerae.local / password from SEED_ADMIN_PASSWORD or default `changeme`");
+  console.log("Firm admin:  admin@phalerae.local    / SEED_ADMIN_PASSWORD (default: changeme)");
+  console.log("Operator:    operator@phalerae.local / SEED_ADMIN_PASSWORD (default: changeme)");
 }
 
 main()

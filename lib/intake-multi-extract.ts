@@ -31,8 +31,6 @@ export function confidenceThresholdForField(key: FlowStepKey): number {
       return 0.52;
     case "motorVehicleInvolvement":
       return 0.55;
-    case "preferredContact":
-      return 0.55;
     default:
       return 0.55;
   }

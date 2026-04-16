@@ -1,6 +1,5 @@
 import type { Firm } from "@/app/generated/prisma/client";
 import { formatDisclaimerBlock } from "@/lib/disclaimer";
-import { getFirmConfigForSlug } from "@/config/firm";
 
 /** Stored in `Firm.branding` JSON — no migration required. */
 export type FirmBrandingJson = {
@@ -42,33 +41,24 @@ export function parseFirmBranding(json: unknown): FirmBrandingJson {
 }
 
 /**
- * Single merge point: `config/firm.ts` wins for matching slug; otherwise DB `branding` + `disclaimerOverride`.
+ * Resolves display values from DB `branding` JSON + `disclaimerOverride`.
  *
  * Firm.name is the primary label; optional branding.displayName overrides only when set and
  * different (see admin save logic clearing stale displayName when the main name changes).
  */
 export function resolveFirmDisplay(firm: Firm): ResolvedFirmDisplay {
-  const cfg = getFirmConfigForSlug(firm.slug);
   const b = parseFirmBranding(firm.branding);
 
   const firmName =
-    cfg?.firmName?.trim() ||
     b.displayName?.trim() ||
     firm.name?.trim() ||
     "Firm";
-  const primaryColor =
-    cfg?.primaryColor?.trim() || b.primaryColor?.trim() || "#1e3a5f";
-  const logoUrl = (cfg?.logoUrl?.trim() || b.logoUrl?.trim() || "").trim();
-  const urgentPhoneDisplay =
-    cfg?.urgentPhoneDisplay?.trim() ||
-    b.urgentPhoneDisplay?.trim() ||
-    "";
-  const urgentPhoneTel =
-    cfg?.urgentPhoneTel?.trim() || b.urgentPhoneTel?.trim() || "";
-  const disclaimerText =
-    cfg?.disclaimerText?.trim() || formatDisclaimerBlock(firm.disclaimerOverride);
-  const greetingMessage =
-    cfg?.greetingMessage?.trim() || b.greetingMessage?.trim() || null;
+  const primaryColor = b.primaryColor?.trim() || "#1e3a5f";
+  const logoUrl = (b.logoUrl?.trim() || "").trim();
+  const urgentPhoneDisplay = b.urgentPhoneDisplay?.trim() || "";
+  const urgentPhoneTel = b.urgentPhoneTel?.trim() || "";
+  const disclaimerText = formatDisclaimerBlock(firm.disclaimerOverride);
+  const greetingMessage = b.greetingMessage?.trim() || null;
 
   return {
     firmName,
@@ -81,12 +71,10 @@ export function resolveFirmDisplay(firm: Firm): ResolvedFirmDisplay {
   };
 }
 
-/** Lead alert recipient: code config first, then branding.contactEmail, then Firm.notificationEmail. */
+/** Lead alert recipient: branding.contactEmail, then Firm.notificationEmail. */
 export function resolveLeadAlertEmail(firm: Firm): string | null {
-  const cfg = getFirmConfigForSlug(firm.slug);
   const b = parseFirmBranding(firm.branding);
-  const fromCfg = cfg?.contactEmail?.trim();
   const fromBranding = b.contactEmail?.trim();
   const fromRow = firm.notificationEmail?.trim();
-  return fromCfg || fromBranding || fromRow || null;
+  return fromBranding || fromRow || null;
 }

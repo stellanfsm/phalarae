@@ -13,10 +13,29 @@ function secretKey(): Uint8Array {
 export type AdminJwtPayload = {
   sub: string;
   email: string;
+  /** undefined on legacy tokens issued before Phase 1 */
+  firmId?: string | null;
+  /** undefined on legacy tokens issued before Phase 1 */
+  role?: string;
+  /** undefined on legacy tokens issued before Phase 1 */
+  sessionId?: string;
 };
 
-export async function signAdminToken(payload: AdminJwtPayload, maxAgeSec: number): Promise<string> {
-  return new SignJWT({ email: payload.email })
+export type AdminTokenInput = {
+  sub: string;
+  email: string;
+  firmId: string | null;
+  role: string;
+  sessionId: string;
+};
+
+export async function signAdminToken(payload: AdminTokenInput, maxAgeSec: number): Promise<string> {
+  return new SignJWT({
+    email: payload.email,
+    firmId: payload.firmId,
+    role: payload.role,
+    sessionId: payload.sessionId,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
@@ -30,7 +49,16 @@ export async function verifyAdminToken(token: string): Promise<AdminJwtPayload |
     const sub = typeof payload.sub === "string" ? payload.sub : null;
     const email = typeof payload.email === "string" ? payload.email : null;
     if (!sub || !email) return null;
-    return { sub, email };
+    // firmId: null is a valid value (operator); undefined means claim absent (legacy token)
+    const firmId: string | null | undefined =
+      payload.firmId === null
+        ? null
+        : typeof payload.firmId === "string"
+          ? payload.firmId
+          : undefined;
+    const role = typeof payload.role === "string" ? payload.role : undefined;
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+    return { sub, email, firmId, role, sessionId };
   } catch {
     return null;
   }

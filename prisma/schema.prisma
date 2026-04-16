@@ -23,21 +23,46 @@ model Firm {
   intakeConfig         Json?
   /// Receives new-lead email alerts (falls back to env in MVP)
   notificationEmail    String?
+  /// "pending" | "active" | "inactive"
+  status               String          @default("pending")
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   leads                Lead[]
   intakeSessions       IntakeSession[]
   adminUsers           AdminUser[]
+  invites              AdminInvite[]
 }
 
 model AdminUser {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  /// null = operator can see all firms (MVP has one firm)
-  firmId       String?
-  firm         Firm?    @relation(fields: [firmId], references: [id], onDelete: SetNull)
-  createdAt    DateTime @default(now())
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  /// "operator" | "firm_admin" | "firm_staff"
+  role          String         @default("firm_admin")
+  name          String?
+  /// null = platform operator (all firms)
+  firmId        String?
+  firm          Firm?          @relation(fields: [firmId], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+  /// @default(now()) backfills existing rows during migration
+  updatedAt     DateTime       @default(now()) @updatedAt
+  lastLoginAt   DateTime?
+  deactivatedAt DateTime?
+  sessions       AdminSession[]
+  createdInvites  AdminInvite[]
+  assignedLeads   Lead[]         @relation("LeadAssignee")
+  leadNotes       LeadNote[]
+}
+
+model AdminSession {
+  id         String    @id @default(cuid())
+  userId     String
+  user       AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ipAddress  String?
+  userAgent  String?   @db.Text
+  createdAt  DateTime  @default(now())
 }
 
 model IntakeSession {
@@ -66,6 +91,22 @@ model IntakeMessage {
   createdAt DateTime      @default(now())
 }
 
+model AdminInvite {
+  id          String    @id @default(cuid())
+  firmId      String
+  firm        Firm      @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  email       String
+  /// "firm_admin" | "firm_staff"
+  role        String    @default("firm_admin")
+  /// 64-char hex random token; used in the invite URL
+  token       String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String
+  createdBy   AdminUser @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime  @default(now())
+}
+
 model Lead {
   id                 String        @id @default(cuid())
   firmId             String
@@ -82,5 +123,23 @@ model Lead {
   alertStatus        String        @default("no_recipient")
   /// Provider error message when alertStatus = "failed"
   alertError         String?       @db.Text
+  /// "new" | "open" | "contacted" | "archived"
+  workflowStatus     String        @default("new")
+  /// Set once when a user first opens the lead detail page. Never reset.
+  reviewedAt         DateTime?
+  assignedToId       String?
+  assignedTo         AdminUser?    @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedAt         DateTime?
+  notes              LeadNote[]
   createdAt          DateTime      @default(now())
+}
+
+model LeadNote {
+  id        String    @id @default(cuid())
+  leadId    String
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    AdminUser @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  content   String    @db.Text
+  createdAt DateTime  @default(now())
 }

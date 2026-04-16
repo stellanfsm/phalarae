@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
-import { getAdminSession } from "@/lib/admin-session";
+import { getAdminContext } from "@/lib/admin-context";
 
 export default async function AdminFirmsLayout({ children }: { children: React.ReactNode }) {
-  const session = await getAdminSession();
-  if (!session) redirect("/admin/login");
+  const ctx = await getAdminContext();
+  if (!ctx) redirect("/admin/login");
 
   return (
     <>

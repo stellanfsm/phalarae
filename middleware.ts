@@ -15,7 +15,11 @@ export async function middleware(req: NextRequest) {
   }
 
   if (!pathname.startsWith("/admin")) return NextResponse.next();
-  if (pathname === "/admin" || pathname.startsWith("/admin/login")) return NextResponse.next();
+  if (
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/login") ||
+    pathname.startsWith("/admin/invite/")
+  ) return NextResponse.next();
 
   const token = req.cookies.get(ADMIN_COOKIE_NAME)?.value;
   if (!token) {

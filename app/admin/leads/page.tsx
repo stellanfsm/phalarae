@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAdminOperator } from "@/lib/admin-operator";
+import { getAdminContext } from "@/lib/admin-context";
 import { buildIntakeBriefParagraph, parseLeadSummaryJson } from "@/lib/summary";
 import { splitSessionStoredData } from "@/lib/intake-session-meta";
 import { FLOW_SEQUENCE } from "@/lib/intake-steps";
@@ -168,12 +168,26 @@ function computeFunnelStats(sessions: SessionRow[]): {
   return { total, acknowledged, completed, dropoffByStep, clarifyTotals };
 }
 
-export default async function AdminLeadsPage() {
-  const op = await getAdminOperator();
-  if (!op) redirect("/admin/login");
+const VALID_FILTER_STATUSES = ["new", "open", "contacted", "archived"] as const;
+
+export default async function AdminLeadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const ctx = await getAdminContext();
+  if (!ctx) redirect("/admin/login");
+
+  const { status: statusParam } = await searchParams;
+  const activeFilter = (VALID_FILTER_STATUSES as readonly string[]).includes(statusParam ?? "")
+    ? (statusParam as typeof VALID_FILTER_STATUSES[number])
+    : null;
+  const statusWhere = activeFilter
+    ? { workflowStatus: activeFilter }
+    : { workflowStatus: { not: "archived" } };
 
   const sessions = await prisma.intakeSession.findMany({
-    where: op.user.firmId ? { firmId: op.user.firmId } : undefined,
+    where: ctx.firmId ? { firmId: ctx.firmId } : undefined,
     select: { currentStep: true, completedAt: true, data: true },
     orderBy: { createdAt: "desc" },
     take: 2000,
@@ -181,16 +195,20 @@ export default async function AdminLeadsPage() {
   const funnel = computeFunnelStats(sessions);
   const convPct = funnel.total === 0 ? 0 : Math.round((funnel.completed / funnel.total) * 100);
 
+  const firmWhere = ctx.firmId ? { firmId: ctx.firmId } : {};
   const leads = await prisma.lead.findMany({
-    where: op.user.firmId ? { firmId: op.user.firmId } : undefined,
+    where: { ...firmWhere, ...statusWhere },
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { firm: { select: { name: true, slug: true } } },
+    include: {
+      firm: { select: { name: true, slug: true } },
+      assignedTo: { select: { name: true, email: true } },
+    },
   });
 
   const tagCounts = await prisma.lead.groupBy({
     by: ["qualificationTag"],
-    where: op.user.firmId ? { firmId: op.user.firmId } : undefined,
+    where: ctx.firmId ? { firmId: ctx.firmId } : undefined,
     _count: { qualificationTag: true },
   });
   const totalLeads = tagCounts.reduce((s, r) => s + r._count.qualificationTag, 0);
@@ -204,20 +222,27 @@ export default async function AdminLeadsPage() {
   const now = new Date();
   const cut7 = new Date(now.getTime() - 7 * 86_400_000);
   const cut14 = new Date(now.getTime() - 14 * 86_400_000);
-  const fw = op.user.firmId ? { firmId: op.user.firmId } : {};
-  const [sessLast7, sessPrev7, compLast7, compPrev7, relLast7, relPrev7] = await Promise.all([
+  const fw = ctx.firmId ? { firmId: ctx.firmId } : {};
+  const [sessLast7, sessPrev7, compLast7, compPrev7, relLast7, relPrev7, newLeadsCount] = await Promise.all([
     prisma.intakeSession.count({ where: { ...fw, createdAt: { gte: cut7 } } }),
     prisma.intakeSession.count({ where: { ...fw, createdAt: { gte: cut14, lt: cut7 } } }),
     prisma.intakeSession.count({ where: { ...fw, completedAt: { gte: cut7 } } }),
     prisma.intakeSession.count({ where: { ...fw, completedAt: { gte: cut14, lt: cut7 } } }),
     prisma.lead.count({ where: { ...fw, qualificationTag: "likely_relevant", createdAt: { gte: cut7 } } }),
     prisma.lead.count({ where: { ...fw, qualificationTag: "likely_relevant", createdAt: { gte: cut14, lt: cut7 } } }),
+    prisma.lead.count({ where: { ...fw, workflowStatus: "new" } }),
   ]);
   const compRate7 = sessLast7 === 0 ? null : Math.round((compLast7 / sessLast7) * 100);
   const summaryText = pilotSummary(sessLast7, compLast7, compPrev7, relLast7);
+  const hasNoRecipient = leads.some((l) => l.alertStatus === "no_recipient" || l.alertStatus === "failed");
 
   return (
     <div>
+      {hasNoRecipient && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Some leads were not emailed due to a configuration or delivery issue. Please review alert status.
+        </div>
+      )}
       <div className="rounded-xl border border-[#e2e0d9] bg-white p-5 shadow-sm">
         <span className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Snapshot · last 7 days</span>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-[#334155]">{summaryText}</p>
@@ -353,7 +378,59 @@ export default async function AdminLeadsPage() {
         )}
       </div>
 
-      <div className="mt-8 overflow-hidden rounded-lg border border-[#e2e0d9] bg-white shadow-sm">
+      <div className="mt-8">
+        {newLeadsCount > 0 && activeFilter !== "new" && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
+            <span className="text-sm font-medium text-amber-900">
+              {newLeadsCount} new {newLeadsCount === 1 ? "lead" : "leads"} waiting for review
+            </span>
+            <Link
+              href="/admin/leads?status=new"
+              className="ml-auto text-xs font-medium text-amber-700 underline underline-offset-2 hover:no-underline"
+            >
+              View new →
+            </Link>
+          </div>
+        )}
+        <div className="mb-3 flex flex-wrap gap-1">
+          {(
+            [
+              { label: "All", filter: null },
+              { label: "New", filter: "new" },
+              { label: "Open", filter: "open" },
+              { label: "Contacted", filter: "contacted" },
+              { label: "Archived", filter: "archived" },
+            ] as { label: string; filter: string | null }[]
+          ).map(({ label, filter }) => {
+            const href = filter ? `/admin/leads?status=${filter}` : "/admin/leads";
+            const isActive = activeFilter === filter;
+            return (
+              <Link
+                key={label}
+                href={href}
+                className={
+                  isActive
+                    ? "rounded-lg bg-[#0f172a] px-3 py-1.5 text-xs font-semibold text-white"
+                    : "rounded-lg border border-[#e2e0d9] bg-white px-3 py-1.5 text-xs font-medium text-[#475569] hover:bg-[#f1f5f9]"
+                }
+              >
+                {label}
+                {label === "New" && newLeadsCount > 0 && (
+                  <span
+                    className={`ml-1.5 rounded-full px-1.5 text-[10px] font-semibold ${
+                      isActive ? "bg-white/20 text-white" : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {newLeadsCount}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-[#e2e0d9] bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="border-b border-[#e2e0d9] bg-[#fafaf8] text-xs font-medium uppercase tracking-wide text-[#64748b]">
@@ -364,25 +441,31 @@ export default async function AdminLeadsPage() {
                 <th className="px-4 py-3">Firm</th>
                 <th className="px-4 py-3">Tag</th>
                 <th className="px-4 py-3">Alert</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Assigned</th>
                 <th className="px-4 py-3">Brief summary</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f1f0eb]">
               {leads.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[#64748b]">
-                    No leads yet. Complete an intake at{" "}
-                    <Link className="text-[#0f172a] underline" href="/intake/demo">
-                      /intake/demo
-                    </Link>
-                    .
+                  <td colSpan={9} className="px-4 py-10 text-center text-[#64748b]">
+                    No leads yet. Leads will appear here once users complete the intake.
                   </td>
                 </tr>
               ) : (
                 leads.map((lead) => {
+                  const assignee = (lead as { assignedTo?: { name: string | null; email: string } | null }).assignedTo;
                   const brief = briefForLead(lead.summaryJson, lead.humanSummary);
                   return (
-                    <tr key={lead.id} className="hover:bg-[#fafaf8]">
+                    <tr
+                      key={lead.id}
+                      className={
+                        (lead as { workflowStatus?: string }).workflowStatus === "new"
+                          ? "bg-amber-50 hover:bg-amber-100"
+                          : "hover:bg-[#fafaf8]"
+                      }
+                    >
                       <td className="whitespace-nowrap px-4 py-3 text-[#475569]">
                         {lead.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
                       </td>
@@ -411,6 +494,28 @@ export default async function AdminLeadsPage() {
                         >
                           {alertStatusLabel(lead.alertStatus)}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 align-top">
+                        {(lead as { workflowStatus?: string }).workflowStatus === "new" && (
+                          <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+                            New
+                          </span>
+                        )}
+                        {(lead as { workflowStatus?: string }).workflowStatus === "contacted" && (
+                          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-800 ring-1 ring-inset ring-blue-200">
+                            Contacted
+                          </span>
+                        )}
+                        {(lead as { workflowStatus?: string }).workflowStatus === "archived" && (
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+                            Archived
+                          </span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-[#475569]">
+                        {assignee
+                          ? (assignee.name ?? assignee.email.split("@")[0])
+                          : <span className="text-[#cbd5e1]">—</span>}
                       </td>
                       <td className="max-w-md px-4 py-3 text-[#475569]">
                         <p className="line-clamp-3 text-[13px] leading-relaxed">{brief}</p>

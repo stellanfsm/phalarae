@@ -5,7 +5,6 @@ import {
   normalizeIncidentTypeDetailed,
   normalizeMotorInvolvement,
   normalizePhoneDigits,
-  normalizePreferredContact,
   normalizeTriState,
 } from "@/lib/intake-normalize";
 import { intakePayloadLooseSchema, motorVehicleInvolvementSchema } from "@/lib/schemas/intake-data";
@@ -33,8 +32,6 @@ export function validateFieldKey(key: FlowStepKey, value: unknown): boolean {
 export function parseFieldValueForKey(key: FlowStepKey, raw: string): unknown {
   const t = raw.trim();
   switch (key) {
-    case "preferredContact":
-      return normalizePreferredContact(t) ?? null;
     case "email": {
       const { normalized } = normalizeEmailText(t);
       return isValidEmailFormat(normalized) ? normalized : null;

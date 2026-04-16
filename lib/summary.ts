@@ -158,27 +158,108 @@ export function parseLeadSummaryJson(raw: unknown): LeadSummaryJson | null {
   };
 }
 
-/** Plain-text body for lead alert email (no raw JSON). */
+const EMAIL_SEP = "─".repeat(48);
+
+const INCIDENT_EMAIL_LABEL: Record<IntakePayload["incidentType"], string> = {
+  motor_vehicle: "Motor vehicle",
+  slip_fall: "Slip / trip and fall",
+  workplace: "Workplace injury",
+  medical_malpractice: "Medical malpractice",
+  dog_bite: "Dog bite",
+  other: "Other / unspecified",
+};
+
+const TAG_EMAIL_LABEL: Record<QualificationTag, string> = {
+  likely_relevant: "Likely relevant",
+  needs_review: "Needs review",
+  low_relevance: "Low relevance",
+};
+
+function triLabel(val: string | undefined): string {
+  if (val === "yes") return "Yes";
+  if (val === "no") return "No";
+  if (val === "unclear") return "Unclear";
+  return "—";
+}
+
+/** Structured plain-text body for lead alert email. */
 export function buildLeadEmailBody(params: {
   firmName: string;
-  contactName: string;
   qualificationTag: QualificationTag;
-  briefParagraph: string;
-  humanSummary: string;
+  intake: IntakePayload;
+  urgentSelfReported: boolean;
+  submittedAt: Date;
+  leadAdminUrl: string | null;
 }): string {
-  return [
-    `New intake lead — ${params.firmName}`,
+  const { firmName, qualificationTag, intake: d, urgentSelfReported, submittedAt, leadAdminUrl } = params;
+  const dateStr = submittedAt.toLocaleString("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  const lines: string[] = [
+    `New intake submission · ${firmName}`,
+    `Submitted: ${dateStr}`,
     "",
-    `Contact: ${params.contactName}`,
-    `Qualification tag (non-legal routing): ${params.qualificationTag}`,
+    EMAIL_SEP,
     "",
-    "Summary",
-    params.briefParagraph,
+    "CONTACT",
+    `  Name:   ${d.fullName}`,
+    `  Phone:  ${d.phone}`,
+    `  Email:  ${d.email}`,
     "",
-    "Details",
-    params.humanSummary,
-    "",
-    "—",
-    "Structured data is available in the Phalerae admin dashboard.",
-  ].join("\n");
+  ];
+
+  if (urgentSelfReported) {
+    lines.push("⚠ URGENT — this person flagged their matter as needing urgent follow-up.", "");
+  }
+
+  lines.push(EMAIL_SEP, "");
+
+  lines.push("INCIDENT");
+  lines.push(`  Type:      ${INCIDENT_EMAIL_LABEL[d.incidentType]}`);
+  if (d.incidentType === "motor_vehicle" && d.motorVehicleInvolvement) {
+    const mvLabel =
+      d.motorVehicleInvolvement === "multi_vehicle" ? "Multi-vehicle" :
+      d.motorVehicleInvolvement === "single_vehicle" ? "Single vehicle" : "Unclear";
+    lines.push(`  Vehicles:  ${mvLabel}`);
+  }
+  lines.push(`  Date:      ${d.incidentDate}`);
+  lines.push(`  Location:  ${d.incidentLocation}`);
+  lines.push("");
+
+  lines.push("CASE FLAGS (self-reported, not verified)");
+  lines.push(`  Injuries:          ${triLabel(d.injuries)}`);
+  lines.push(`  Medical treatment: ${triLabel(d.medicalTreatment)}`);
+  lines.push(`  Other-party fault: ${triLabel(d.otherPartyFault)}`);
+  lines.push(`  Police report:     ${triLabel(d.policeReport)}`);
+  lines.push(`  Has attorney:      ${triLabel(d.hasAttorney)}`);
+  lines.push(`  Urgent:            ${triLabel(d.urgent)}`);
+  lines.push("");
+
+  lines.push("ROUTING");
+  lines.push(`  Tag:  ${TAG_EMAIL_LABEL[qualificationTag]}`);
+  lines.push(`  Note: Automated routing hint — not a legal conclusion.`);
+  lines.push("");
+
+  lines.push("NARRATIVE");
+  lines.push(d.description);
+  lines.push("");
+
+  lines.push(EMAIL_SEP, "");
+  if (leadAdminUrl) {
+    lines.push(`Review in dashboard: ${leadAdminUrl}`);
+  } else {
+    lines.push("Log in to your admin dashboard to review this lead.");
+  }
+  lines.push("");
+  lines.push("Tags are automated routing hints only — not legal conclusions. Always review leads directly.");
+
+  return lines.join("\n");
 }

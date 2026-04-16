@@ -47,7 +47,7 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
-  if (!user) {
+  if (!user || user.deactivatedAt !== null) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
@@ -56,13 +56,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
+  const userAgent = req.headers.get("user-agent") ?? undefined;
+
+  let adminSession: { id: string };
   let token: string;
   try {
-    token = await signAdminToken({ sub: user.id, email: user.email }, MAX_AGE_SEC);
+    [adminSession] = await prisma.$transaction([
+      prisma.adminSession.create({
+        data: {
+          userId: user.id,
+          expiresAt: new Date(Date.now() + MAX_AGE_SEC * 1000),
+          ipAddress: ip,
+          userAgent: userAgent ?? null,
+        },
+        select: { id: true },
+      }),
+      prisma.adminUser.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      }),
+    ]);
+    token = await signAdminToken(
+      {
+        sub: user.id,
+        email: user.email,
+        firmId: user.firmId,
+        role: user.role,
+        sessionId: adminSession.id,
+      },
+      MAX_AGE_SEC,
+    );
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
+
+  void prisma.adminSession
+    .deleteMany({
+      where: {
+        userId: user.id,
+        OR: [{ expiresAt: { lt: new Date() } }, { revokedAt: { not: null } }],
+      },
+    })
+    .catch(() => {});
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set(ADMIN_COOKIE_NAME, token, adminCookieOptions(MAX_AGE_SEC));

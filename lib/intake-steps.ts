@@ -21,7 +21,6 @@ export const FLOW_SEQUENCE = [
   "fullName",
   "email",
   "phone",
-  "preferredContact",
 ] as const satisfies readonly (keyof IntakePayload)[];
 
 export type FlowStepKey = (typeof FLOW_SEQUENCE)[number];
@@ -59,7 +58,6 @@ const QUESTIONS: Record<FlowStepKey, string> = {
   fullName: "What is your full legal name?",
   email: "What is the best email address to reach you?",
   phone: "What is a good phone number to reach you?",
-  preferredContact: "How should we contact you — email, phone, or either?",
 };
 
 /** Alternate phrasings — same deterministic order, reduces repeated identical prompts. */

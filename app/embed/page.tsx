@@ -33,6 +33,7 @@ export default async function EmbedPage({
     throw new Error("Database connection failed. Check DATABASE_URL.");
   }
   if (!firm) notFound();
+  if (firm.status !== "active") notFound();
 
   const r = resolveFirmDisplay(firm);
 

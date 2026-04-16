@@ -1,5 +1,3 @@
-import { firmDemoConfig } from "@/config/firm";
-
 /**
  * URL query overrides for /embed (MVP). Keeps CSS injection out of style attributes.
  */
@@ -18,7 +16,7 @@ const NAMED_COLORS: Record<string, string> = {
 
 export function defaultEmbedSlug(raw: string | undefined): string {
   const s = typeof raw === "string" ? raw.trim() : "";
-  return s || firmDemoConfig.intakeSlug;
+  return s;
 }
 
 export function resolveEmbedPrimaryColor(raw: string | undefined, fallback: string): string {

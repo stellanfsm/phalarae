@@ -2,9 +2,12 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAdminOperator } from "@/lib/admin-operator";
+import { getAdminContext, requireFirmAccess } from "@/lib/admin-context";
 import { buildIntakeBriefParagraph, parseLeadSummaryJson } from "@/lib/summary";
 import type { IntakePayload } from "@/lib/schemas/intake-data";
+import { LeadWorkflowControl } from "@/components/admin/LeadWorkflowControl";
+import { LeadAssignControl } from "@/components/admin/LeadAssignControl";
+import { LeadNoteInput } from "@/components/admin/LeadNoteInput";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +34,28 @@ function tagLabel(tag: string): string {
       return "Low relevance";
     default:
       return tag;
+  }
+}
+
+type WorkflowStatus = "new" | "open" | "contacted" | "archived";
+
+function workflowStatusStyle(status: string): string {
+  switch (status) {
+    case "new": return "bg-amber-50 text-amber-800 ring-amber-200";
+    case "open": return "bg-slate-100 text-slate-600 ring-slate-200";
+    case "contacted": return "bg-blue-50 text-blue-800 ring-blue-200";
+    case "archived": return "bg-slate-100 text-slate-500 ring-slate-200";
+    default: return "bg-slate-50 text-slate-600 ring-slate-200";
+  }
+}
+
+function workflowStatusLabel(status: string): string {
+  switch (status) {
+    case "new": return "New";
+    case "open": return "Open";
+    case "contacted": return "Contacted";
+    case "archived": return "Archived";
+    default: return status;
   }
 }
 
@@ -107,17 +132,52 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+type NoteWithAuthor = {
+  id: string;
+  content: string;
+  createdAt: Date;
+  author: { name: string | null; email: string };
+};
+
+type FirmUser = { id: string; name: string | null; email: string };
+
 export default async function AdminLeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const op = await getAdminOperator();
-  if (!op) redirect("/admin/login");
+  const ctx = await getAdminContext();
+  if (!ctx) redirect("/admin/login");
 
   const lead = await prisma.lead.findUnique({
     where: { id },
-    include: { firm: true, intakeSession: true },
+    include: {
+      firm: true,
+      intakeSession: true,
+      assignedTo: { select: { id: true, name: true, email: true } },
+      notes: {
+        orderBy: { createdAt: "asc" },
+        include: { author: { select: { name: true, email: true } } },
+      },
+    },
   });
   if (!lead) notFound();
-  if (op.user.firmId != null && lead.firmId !== op.user.firmId) notFound();
+  requireFirmAccess(ctx, lead.firmId);
+
+  const notes = ((lead as unknown as { notes?: NoteWithAuthor[] }).notes ?? []) as NoteWithAuthor[];
+  const currentAssigneeId =
+    (lead as unknown as { assignedToId?: string | null }).assignedToId ?? null;
+  const firmUsers: FirmUser[] = await prisma.adminUser.findMany({
+    where: { firmId: lead.firmId, deactivatedAt: null, role: { in: ["firm_admin", "firm_staff"] } },
+    select: { id: true, name: true, email: true },
+    orderBy: [{ name: "asc" }, { email: "asc" }],
+  });
+
+  if ((lead as { workflowStatus?: string }).workflowStatus === "new") {
+    await prisma.lead.update({
+      where: { id },
+      data: { workflowStatus: "open", reviewedAt: new Date() },
+    });
+    (lead as { workflowStatus?: string }).workflowStatus = "open";
+  }
+  const effectiveStatus = ((lead as { workflowStatus?: string }).workflowStatus ?? "open") as WorkflowStatus;
 
   const jsonPretty = JSON.stringify(lead.summaryJson, null, 2);
   const parsed = parseLeadSummaryJson(lead.summaryJson);
@@ -150,6 +210,11 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
         >
           {alertStatusLabel(lead.alertStatus)}
         </span>
+        <span
+          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${workflowStatusStyle(effectiveStatus)}`}
+        >
+          {workflowStatusLabel(effectiveStatus)}
+        </span>
       </div>
       <p className="mt-1 text-sm text-[#64748b]">
         Submitted {lead.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} · {lead.firm.name}
@@ -166,6 +231,15 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
           {brief}
         </p>
       ) : null}
+
+      <div className="mt-6 max-w-sm space-y-3">
+        <LeadWorkflowControl leadId={lead.id} currentStatus={effectiveStatus} />
+        <LeadAssignControl
+          leadId={lead.id}
+          currentAssigneeId={currentAssigneeId}
+          firmUsers={firmUsers}
+        />
+      </div>
 
       {intake != null ? (
         <>
@@ -249,6 +323,30 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
           </pre>
         </section>
       )}
+
+      {/* Notes */}
+      <section className="mt-6 rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Notes</h2>
+        {notes.length === 0 ? (
+          <p className="mt-3 text-sm text-[#94a3b8]">No notes yet.</p>
+        ) : (
+          <div className="mt-3 divide-y divide-[#f1f0eb]">
+            {notes.map((note) => (
+              <div key={note.id} className="py-3 first:pt-0">
+                <p className="text-xs text-[#64748b]">
+                  <span className="font-medium text-[#334155]">
+                    {note.author.name ?? note.author.email}
+                  </span>
+                  {" · "}
+                  {note.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-[#334155]">{note.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        <LeadNoteInput leadId={lead.id} />
+      </section>
 
       {/* Raw data — collapsed by default */}
       <details className="mt-6">

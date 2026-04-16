@@ -16,6 +16,41 @@ type Props = {
   variant?: "page" | "embed";
 };
 
+const RESUME_WINDOW_MS = 2 * 60 * 60 * 1000;
+const sessionStoreKey = (slug: string) => `phalarae_session_${slug}`;
+
+function readStoredSession(slug: string): string | null {
+  try {
+    const raw = localStorage.getItem(sessionStoreKey(slug));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { sessionId?: string; savedAt?: number };
+    if (!parsed.sessionId || !parsed.savedAt) return null;
+    if (Date.now() - parsed.savedAt > RESUME_WINDOW_MS) {
+      localStorage.removeItem(sessionStoreKey(slug));
+      return null;
+    }
+    return parsed.sessionId;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(slug: string, sessionId: string): void {
+  try {
+    localStorage.setItem(sessionStoreKey(slug), JSON.stringify({ sessionId, savedAt: Date.now() }));
+  } catch {
+    // Ignore — localStorage may be unavailable (e.g. privacy mode restrictions).
+  }
+}
+
+function clearStoredSession(slug: string): void {
+  try {
+    localStorage.removeItem(sessionStoreKey(slug));
+  } catch {
+    // Ignore.
+  }
+}
+
 export function IntakeClient({
   firmSlug,
   firmDisplayName,
@@ -62,7 +97,49 @@ export function IntakeClient({
     setProgressHints([]);
     setLoading(true);
     setError(null);
+
+    const storedSessionId = readStoredSession(firmSlug);
+
     (async () => {
+      // Attempt resume first when there is a stored session within the staleness window.
+      if (storedSessionId) {
+        try {
+          const res = await fetch("/api/intake", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "resume", sessionId: storedSessionId, firmSlug }),
+          });
+          if (res.ok) {
+            const j = (await res.json()) as {
+              resume?: boolean;
+              sessionId?: string;
+              messages?: Msg[];
+              currentStep?: string;
+              progress?: { step: number; total: number } | null;
+              progressHints?: string[];
+            };
+            if (j.resume && j.sessionId) {
+              if (!cancelled) {
+                setSessionId(j.sessionId);
+                setMessages(j.messages ?? []);
+                setDisclaimerAcknowledged(
+                  j.currentStep !== undefined && j.currentStep !== "disclaimer",
+                );
+                if (j.progress) setProgress(j.progress);
+                setProgressHints(Array.isArray(j.progressHints) ? j.progressHints : []);
+                setLoading(false);
+              }
+              return;
+            }
+          }
+        } catch {
+          // Resume request failed — fall through to a fresh start.
+        }
+        // Server returned resume: false or the request threw — stored session is no longer valid.
+        clearStoredSession(firmSlug);
+      }
+
+      // Fresh start.
       try {
         const res = await fetch("/api/intake", {
           method: "POST",
@@ -92,6 +169,7 @@ export function IntakeClient({
         setMessages(j.messages ?? []);
         if (j.progress) setProgress(j.progress);
         setProgressHints(Array.isArray(j.progressHints) ? j.progressHints : []);
+        if (j.sessionId) writeStoredSession(firmSlug, j.sessionId);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Error");
       } finally {
@@ -150,6 +228,7 @@ export function IntakeClient({
       const j = (await res.json()) as {
         messages?: Msg[];
         done?: boolean;
+        alreadyCompleted?: boolean;
         leadId?: string;
         progress?: { step: number; total: number } | null;
         progressHints?: string[];
@@ -157,11 +236,20 @@ export function IntakeClient({
         error?: string;
       };
       if (!res.ok) throw new Error(j.error ?? "Could not send");
+      if (j.alreadyCompleted) {
+        // The final transaction succeeded on a previous attempt but the response was dropped.
+        // Transition to done without overwriting the visible message history.
+        clearStoredSession(firmSlug);
+        setDone(true);
+        setProgress(null);
+        return;
+      }
       setInput("");
       setMessages(j.messages ?? []);
       if (j.progress) setProgress(j.progress);
       setProgressHints(Array.isArray(j.progressHints) ? j.progressHints : []);
       if (j.done) {
+        clearStoredSession(firmSlug);
         setDone(true);
         setLeadId(j.leadId ?? null);
         setUrgentSelfReported(j.submission?.urgentSelfReported ?? false);
@@ -360,11 +448,11 @@ export function IntakeClient({
             </p>
             {urgentSelfReported ? (
               <p className="mt-4 text-[#334155]">
-                <span className="font-medium text-[#0f172a]">
-                  Because you indicated this may be urgent, please contact the office directly.
-                </span>
                 {urgentPhoneDisplay ? (
                   <>
+                    <span className="font-medium text-[#0f172a]">
+                      Because you indicated this may be urgent, please contact the office directly.
+                    </span>
                     {" "}
                     <a
                       href={`tel:${urgentPhoneTel}`}
@@ -374,7 +462,11 @@ export function IntakeClient({
                       {urgentPhoneDisplay}
                     </a>
                   </>
-                ) : null}
+                ) : (
+                  <span className="font-medium text-[#0f172a]">
+                    Because you indicated this may be urgent, our team will prioritize your submission and contact you as soon as possible.
+                  </span>
+                )}
               </p>
             ) : urgentPhoneDisplay ? (
               <p className="mt-4 text-[#334155]">

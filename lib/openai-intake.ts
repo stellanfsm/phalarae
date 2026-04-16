@@ -44,8 +44,6 @@ const INCIDENT_TYPES =
 
 function fieldHint(key: FlowStepKey): string {
   switch (key) {
-    case "preferredContact":
-      return "Normalize to exactly one of: email | phone | either (both maps to either)";
     case "incidentType":
       return `Normalize to one of: ${INCIDENT_TYPES}. Preserve user wording in value text if needed.`;
     case "motorVehicleInvolvement":
@@ -73,8 +71,6 @@ export function clarifyPrompt(key: FlowStepKey, userText?: string): string {
     }
     case "email":
       return "That email doesn’t look valid. Try again — you can use name@domain.com format (or “name at domain dot com”).";
-    case "preferredContact":
-      return "Reply with email, phone, either, or both (both counts as either).";
     case "motorVehicleInvolvement":
       return "Was it multiple vehicles involved, or a single-vehicle crash? (Or say not sure.)";
     case "incidentType":

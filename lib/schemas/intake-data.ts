@@ -25,7 +25,7 @@ export const intakePayloadLooseSchema = z.object({
   fullName: z.string().min(2).max(200),
   email: z.string().email().max(320),
   phone: z.string().min(7).max(40),
-  preferredContact: preferredContactSchema,
+  preferredContact: preferredContactSchema.default("either"),
   incidentDate: z.string().min(4).max(64),
   incidentLocation: z.string().min(2).max(200),
   incidentType: incidentTypeSchema,

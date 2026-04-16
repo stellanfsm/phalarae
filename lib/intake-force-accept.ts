@@ -33,8 +33,6 @@ export function buildForceAcceptedValue(key: FlowStepKey, raw: string): unknown 
       return "other";
     case "motorVehicleInvolvement":
       return "unclear";
-    case "preferredContact":
-      return "either";
     default:
       return t;
   }

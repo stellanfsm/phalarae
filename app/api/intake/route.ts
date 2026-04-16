@@ -24,28 +24,13 @@ import { prisma } from "@/lib/prisma";
 import { qualifyIntake } from "@/lib/qualify";
 import { clientIp, checkIntakeStart, checkIntakeAcknowledge, checkIntakeMessage } from "@/lib/rate-limit";
 import { intakePayloadSchema, type IntakePayload } from "@/lib/schemas/intake-data";
-import { getFirmConfigForSlug } from "@/config/firm";
 import type { Firm } from "@/app/generated/prisma/client";
 import { resolveFirmDisplay, resolveLeadAlertEmail } from "@/lib/firm-display";
-import { buildHumanSummary, buildIntakeBriefParagraph, buildSummaryJson } from "@/lib/summary";
+import { buildHumanSummary, buildSummaryJson } from "@/lib/summary";
 import { sendNewLeadAlert } from "@/lib/email";
 
 function openingMessagesForFirm(firm: Firm) {
-  const cfg = getFirmConfigForSlug(firm.slug);
   const r = resolveFirmDisplay(firm);
-
-  if (cfg) {
-    const greeting = [
-      `Thank you for contacting ${cfg.firmName}.`,
-      "",
-      cfg.greetingMessage.trim(),
-      "",
-      "I'm an automated intake assistant — not a lawyer. I can't provide legal advice.",
-      "This conversation does not create an attorney–client relationship. Only a licensed attorney can evaluate your matter.",
-      "If you are having a medical or safety emergency, call 911 (or your local emergency number) right away.",
-    ].join("\n");
-    return { greeting, disclaimer: cfg.disclaimerText.trim() };
-  }
 
   const customGreeting = r.greetingMessage?.trim();
   const lines = [`Thank you for contacting ${r.firmName}.`, ""];
@@ -61,10 +46,9 @@ function openingMessagesForFirm(firm: Firm) {
 }
 
 function closingMessageForFirm(firm: Firm, opts: { urgentYes: boolean }): string {
-  const cfg = getFirmConfigForSlug(firm.slug);
   const r = resolveFirmDisplay(firm);
-  const firmName = (cfg?.firmName ?? r.firmName).trim() || r.firmName;
-  const urgentPhoneDisplay = cfg?.urgentPhoneDisplay ?? r.urgentPhoneDisplay;
+  const firmName = r.firmName.trim() || r.firmName;
+  const urgentPhoneDisplay = r.urgentPhoneDisplay;
 
   const lines = [
     "Thank you — your information has been received.",
@@ -75,7 +59,7 @@ function closingMessageForFirm(firm: Firm, opts: { urgentYes: boolean }): string
     if (urgentPhoneDisplay) {
       lines.push("", `Because you indicated this may be urgent, we recommend calling the office directly: ${urgentPhoneDisplay}.`);
     } else {
-      lines.push("", "Because you indicated this may be urgent, please contact the office as soon as possible.");
+      lines.push("", "Because you indicated this may be urgent, our team will prioritize your submission and contact you as soon as possible.");
     }
   } else if (urgentPhoneDisplay) {
     lines.push("", `To reach the office: ${urgentPhoneDisplay}.`);
@@ -92,6 +76,7 @@ const bodySchema = z.discriminatedUnion("action", [
     sessionId: z.string().min(1),
     text: z.string().min(1).max(8000),
   }),
+  z.object({ action: z.literal("resume"), sessionId: z.string().min(1), firmSlug: z.string().min(1) }),
 ]);
 
 function rateLimitHeaders(retryAfter?: number): HeadersInit {
@@ -119,7 +104,7 @@ export async function POST(req: Request) {
   let rl;
   if (body.action === "start") {
     rl = await checkIntakeStart(ip);
-  } else if (body.action === "acknowledge_disclaimer") {
+  } else if (body.action === "acknowledge_disclaimer" || body.action === "resume") {
     rl = await checkIntakeAcknowledge(ip);
   } else {
     rl = await checkIntakeMessage(ip, body.sessionId);
@@ -136,6 +121,9 @@ export async function POST(req: Request) {
       const firm = await prisma.firm.findUnique({ where: { slug: body.firmSlug } });
       if (!firm) {
         return NextResponse.json({ error: "Firm not found" }, { status: 404 });
+      }
+      if (firm.status !== "active") {
+        return NextResponse.json({ error: "This intake is not currently available." }, { status: 503 });
       }
 
       const session = await prisma.intakeSession.create({
@@ -230,13 +218,55 @@ export async function POST(req: Request) {
       );
     }
 
+    if (body.action === "resume") {
+      const RESUME_WINDOW_MS = 2 * 60 * 60 * 1000;
+      const resumeSession = await prisma.intakeSession.findUnique({
+        where: { id: body.sessionId },
+        include: {
+          firm: true,
+          messages: { orderBy: { createdAt: "asc" }, select: { role: true, content: true } },
+        },
+      });
+      if (
+        !resumeSession ||
+        resumeSession.firm.slug !== body.firmSlug ||
+        resumeSession.completedAt ||
+        resumeSession.currentStep === "complete" ||
+        resumeSession.firm.status !== "active" ||
+        Date.now() - resumeSession.updatedAt.getTime() > RESUME_WINDOW_MS
+      ) {
+        return NextResponse.json({ resume: false }, { headers: rateLimitHeaders() });
+      }
+      const { payload: resumedPayload } = splitSessionStoredData(resumeSession.data);
+      const resumeProgress =
+        resumeSession.currentStep !== "disclaimer"
+          ? intakeProgressLabel(resumedPayload)
+          : null;
+      const resumeHints = resumeProgress ? intakeProgressHints(resumedPayload) : [];
+      return NextResponse.json(
+        {
+          resume: true,
+          sessionId: resumeSession.id,
+          messages: resumeSession.messages,
+          currentStep: resumeSession.currentStep,
+          done: false,
+          progress: resumeProgress,
+          progressHints: resumeHints,
+        },
+        { headers: rateLimitHeaders() },
+      );
+    }
+
     // message
     const session = await prisma.intakeSession.findUnique({
       where: { id: body.sessionId },
       include: { firm: true },
     });
-    if (!session || session.completedAt) {
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (session.completedAt) {
+      return NextResponse.json({ done: true, alreadyCompleted: true });
     }
 
     if (session.currentStep === "disclaimer") {
@@ -249,6 +279,64 @@ export async function POST(req: Request) {
     const step = session.currentStep;
     if (step === "complete") {
       return NextResponse.json({ error: "Session already completed" }, { status: 400 });
+    }
+
+    // LEGACY COMPAT: sessions that were waiting at "preferredContact" before it
+    // was removed from FLOW_SEQUENCE. Apply the Zod default and complete.
+    if (step === "preferredContact") {
+      await prisma.intakeMessage.create({
+        data: { sessionId: session.id, role: "user", content: body.text, meta: { step: "preferredContact", raw: body.text } },
+      });
+      const { payload: legacyPayload, meta: legacyMeta } = splitSessionStoredData(session.data);
+      const legacyData: Partial<IntakePayload> = applyIntakeDefaults({ ...legacyPayload, preferredContact: "either" as const });
+      const nextMissingLegacy = firstMissingField(legacyData);
+      if (nextMissingLegacy) {
+        const followUp = assistantPromptForField(nextMissingLegacy);
+        legacyMeta.lastPromptByField[nextMissingLegacy] = followUp;
+        await prisma.intakeMessage.create({ data: { sessionId: session.id, role: "assistant", content: followUp } });
+        await prisma.intakeSession.update({ where: { id: session.id }, data: { currentStep: nextMissingLegacy, data: mergeSessionStoredData(legacyData, legacyMeta) as object } });
+        const msgs = await prisma.intakeMessage.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: "asc" }, select: { role: true, content: true } });
+        return NextResponse.json({ sessionId: session.id, messages: msgs, currentStep: nextMissingLegacy, done: false, progress: intakeProgressLabel(legacyData), progressHints: intakeProgressHints(legacyData) }, { headers: rateLimitHeaders() });
+      }
+      const legacyFull = intakePayloadSchema.parse(legacyData);
+      const legacyQuality = legacyMeta.forceAcceptedFields.length > 0
+        ? { forceAcceptedFields: [...legacyMeta.forceAcceptedFields], notes: legacyMeta.qualityRequiresReview ? ["One or more answers were accepted after repeated clarification — please verify."] : undefined }
+        : undefined;
+      const legacyTag = qualifyIntake(legacyFull, { qualityRequiresReview: legacyMeta.qualityRequiresReview });
+      const legacyNow = new Date();
+      const legacySummaryJson = buildSummaryJson(legacyFull, legacyTag, legacyNow, legacyQuality);
+      const legacyHumanSummary = buildHumanSummary(legacyFull, legacyTag, legacyNow, legacyQuality);
+      const legacyResolved = resolveFirmDisplay(session.firm);
+      const legacyClosing = closingMessageForFirm(session.firm, { urgentYes: legacyFull.urgent === "yes" });
+      const [, legacyLead] = await prisma.$transaction([
+        prisma.intakeSession.update({ where: { id: session.id }, data: { data: mergeSessionStoredData(legacyData, legacyMeta) as object, currentStep: "complete", completedAt: legacyNow } }),
+        prisma.lead.create({ data: { firmId: session.firmId, intakeSessionId: session.id, qualificationTag: legacyTag, summaryJson: legacySummaryJson as Prisma.InputJsonValue, humanSummary: legacyHumanSummary, contactName: legacyFull.fullName, contactEmail: legacyFull.email, contactPhone: legacyFull.phone } }),
+        prisma.intakeMessage.create({ data: { sessionId: session.id, role: "assistant", content: legacyClosing } }),
+      ]);
+      const legacyTo = resolveLeadAlertEmail(session.firm)?.trim() || process.env.LEAD_ALERT_EMAIL?.trim() || null;
+      let legacyAlertStatus = "no_recipient";
+      let legacyAlertError: string | undefined;
+      if (legacyTo) {
+        try {
+          const legacyProto = req.headers.get("x-forwarded-proto") ?? "https";
+          const legacyHost = req.headers.get("host") ?? "";
+          const legacyLeadAdminUrl = legacyHost ? `${legacyProto}://${legacyHost}/admin/leads/${legacyLead.id}` : null;
+          const r = await sendNewLeadAlert({ to: legacyTo, firmName: legacyResolved.firmName, qualificationTag: legacyTag, intake: legacyFull, urgentSelfReported: legacyFull.urgent === "yes", submittedAt: legacyNow, leadAdminUrl: legacyLeadAdminUrl });
+          legacyAlertStatus = r.sent ? "sent" : "failed";
+          legacyAlertError = r.error;
+        } catch (e) {
+          legacyAlertStatus = "failed";
+          legacyAlertError = e instanceof Error ? e.message : String(e);
+          console.error("[email] sendNewLeadAlert threw for legacy lead", legacyLead.id, e);
+        }
+      }
+      try {
+        await prisma.lead.update({ where: { id: legacyLead.id }, data: { alertStatus: legacyAlertStatus, alertError: legacyAlertError ?? null } });
+      } catch (e) {
+        console.error("[email] failed to persist alertStatus for legacy lead", legacyLead.id, e);
+      }
+      const msgs = await prisma.intakeMessage.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: "asc" }, select: { role: true, content: true } });
+      return NextResponse.json({ sessionId: session.id, messages: msgs, currentStep: "complete", done: true, leadId: legacyLead.id, urgentSelfReported: legacyFull.urgent === "yes", progress: null, progressHints: [] }, { headers: rateLimitHeaders() });
     }
 
     if (!isFlowStepKey(step)) {
@@ -424,7 +512,6 @@ export async function POST(req: Request) {
       const now = new Date();
       const summaryJson = buildSummaryJson(full, tag, now, intakeQuality);
       const humanSummary = buildHumanSummary(full, tag, now, intakeQuality);
-      const briefParagraph = buildIntakeBriefParagraph(full, tag);
       const resolved = resolveFirmDisplay(session.firm);
       const closing = closingMessageForFirm(session.firm, {
         urgentYes: full.urgent === "yes",
@@ -469,13 +556,17 @@ export async function POST(req: Request) {
 
       if (to) {
         try {
+          const proto = req.headers.get("x-forwarded-proto") ?? "https";
+          const host = req.headers.get("host") ?? "";
+          const leadAdminUrl = host ? `${proto}://${host}/admin/leads/${lead.id}` : null;
           const emailResult = await sendNewLeadAlert({
             to,
             firmName: resolved.firmName,
-            contactName: full.fullName,
             qualificationTag: tag,
-            briefParagraph,
-            humanSummary,
+            intake: full,
+            urgentSelfReported: full.urgent === "yes",
+            submittedAt: now,
+            leadAdminUrl,
           });
           alertStatus = emailResult.sent ? "sent" : "failed";
           alertError = emailResult.error;
@@ -529,6 +620,6 @@ export async function POST(req: Request) {
     );
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json({ error: "Something went wrong saving your submission. Please type your last answer again to try once more." }, { status: 500 });
   }
 }

@@ -18,6 +18,7 @@ export function IntakeEmbedWidget(props: IntakeEmbedWidgetProps) {
   const { launcherLabel, ...intakeProps } = props;
   const [open, setOpen] = useState(false);
   const [panelVisible, setPanelVisible] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export function IntakeEmbedWidget(props: IntakeEmbedWidgetProps) {
       closeTimer.current = null;
     }
     setOpen(true);
+    setHasOpened(true);
     requestAnimationFrame(() => setPanelVisible(true));
   }
 
@@ -63,12 +65,14 @@ export function IntakeEmbedWidget(props: IntakeEmbedWidgetProps) {
         </div>
       ) : null}
 
-      {open ? (
+      {hasOpened ? (
         <div
+          style={{ display: open ? undefined : "none" }}
           className="absolute inset-0 z-[2] flex flex-col justify-end p-2 sm:items-end sm:justify-end sm:p-4"
           role="dialog"
           aria-label={`Chat with ${intakeProps.firmDisplayName}`}
-          aria-modal="true"
+          aria-modal={open ? "true" : undefined}
+          aria-hidden={!open || undefined}
         >
           <div
             className={`flex max-h-[min(92dvh,720px)] w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_12px_40px_-8px_rgba(15,23,42,0.25)] transition-[opacity,transform] duration-200 ease-out sm:max-h-[min(580px,85vh)] sm:w-[min(100%,400px)] ${
