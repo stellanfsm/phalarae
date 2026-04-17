@@ -95,14 +95,20 @@ export default async function AdminFirmEditPage({ params }: { params: Promise<{ 
 
       <FirmReadinessPanel firmId={firm.id} readiness={readiness} firmStatus={firm.status} />
 
-      <FirmSettingsForm
-        firmId={firm.id}
-        firmName={firm.name}
-        firmSlug={firm.slug}
-        notificationEmail={firm.notificationEmail ?? ""}
-        disclaimerOverride={firm.disclaimerOverride ?? ""}
-        branding={b}
-      />
+      {ctx.role === "firm_staff" ? (
+        <p className="mt-8 text-sm text-[#94a3b8]">
+          Firm settings can only be edited by a firm admin or operator.
+        </p>
+      ) : (
+        <FirmSettingsForm
+          firmId={firm.id}
+          firmName={firm.name}
+          firmSlug={firm.slug}
+          notificationEmail={firm.notificationEmail ?? ""}
+          disclaimerOverride={firm.disclaimerOverride ?? ""}
+          branding={b}
+        />
+      )}
 
       <div className="mt-8 max-w-xl rounded-lg border border-[#e2e0d9] bg-white p-6 shadow-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-[#64748b]">Embed snippets</h2>

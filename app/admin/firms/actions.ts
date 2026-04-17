@@ -23,6 +23,7 @@ const createFirmSchema = z.object({
 export async function updateFirmSettingsAction(firmId: string, formData: FormData) {
   const ctx = await getAdminContext();
   if (!ctx) throw new Error("Unauthorized");
+  if (ctx.role === "firm_staff") throw new Error("Forbidden");
   if (ctx.role !== "operator" && ctx.firmId !== firmId) throw new Error("Forbidden");
 
   const existing = await prisma.firm.findUnique({ where: { id: firmId } });
