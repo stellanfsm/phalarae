@@ -41,10 +41,17 @@ export async function sendInviteAction(
   }
   const { email, role } = parsed.data;
 
-  const existingUser = await prisma.adminUser.findUnique({
-    where: { email },
-    select: { firmId: true, deactivatedAt: true },
-  });
+  let existingUser: { firmId: string | null; deactivatedAt: Date | null } | null;
+  try {
+    existingUser = await prisma.adminUser.findUnique({
+      where: { email },
+      select: { firmId: true, deactivatedAt: true },
+    });
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: "Service error. Please try again." };
+  }
+
   if (existingUser) {
     if (existingUser.firmId !== firmId) {
       return { ok: false, error: "This email is registered with a different firm." };
@@ -54,17 +61,21 @@ export async function sendInviteAction(
     }
   }
 
-  await prisma.adminInvite.updateMany({
-    where: { firmId, email, usedAt: null },
-    data: { expiresAt: new Date() },
-  });
-
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
-  await prisma.adminInvite.create({
-    data: { firmId, email, role, token: hashInviteToken(token), expiresAt, createdById: ctx.sub },
-  });
+  try {
+    await prisma.adminInvite.updateMany({
+      where: { firmId, email, usedAt: null },
+      data: { expiresAt: new Date() },
+    });
+    await prisma.adminInvite.create({
+      data: { firmId, email, role, token: hashInviteToken(token), expiresAt, createdById: ctx.sub },
+    });
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: "Could not save invite. Please try again." };
+  }
 
   const hdrs = await headers();
   const proto =
@@ -73,13 +84,17 @@ export async function sendInviteAction(
   const host = hdrs.get("host") ?? "localhost:3000";
   const inviteUrl = `${proto}://${host}/admin/invite/${token}`;
 
-  const firm = await prisma.firm.findUnique({
-    where: { id: firmId },
-    select: { name: true },
-  });
+  let firmName = "the firm";
+  try {
+    const firm = await prisma.firm.findUnique({ where: { id: firmId }, select: { name: true } });
+    firmName = firm?.name ?? "the firm";
+  } catch {
+    // non-critical — invite URL already built, email sends with fallback name
+  }
+
   const emailResult = await sendInviteEmail({
     to: email,
-    firmName: firm?.name ?? "the firm",
+    firmName,
     role,
     inviteUrl,
     inviterEmail: ctx.email,

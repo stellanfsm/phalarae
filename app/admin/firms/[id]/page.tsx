@@ -81,6 +81,11 @@ export default async function AdminFirmEditPage({ params }: { params: Promise<{ 
         >
           /embed?slug={firm.slug}
         </a>
+        {firm.status !== "active" && (
+          <span className="ml-2 text-xs font-medium text-amber-700">
+            · not live — set firm to Active first
+          </span>
+        )}
       </p>
 
       {ctx.role === "operator" && (
