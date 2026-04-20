@@ -46,5 +46,10 @@ export async function changePasswordAction(formData: FormData): Promise<ChangePa
     data: { passwordHash: newHash },
   });
 
+  await prisma.adminSession.updateMany({
+    where: { userId: ctx.sub, id: { not: ctx.sessionId }, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+
   return { ok: true };
 }
