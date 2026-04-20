@@ -40,10 +40,7 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error(e);
     return NextResponse.json(
-      {
-        error:
-          "Cannot reach database. Fix DATABASE_URL (try Supabase Session pooler from Project → Connect), then run npm run setup:db.",
-      },
+      { error: "Service temporarily unavailable. Please try again." },
       { status: 503 },
     );
   }

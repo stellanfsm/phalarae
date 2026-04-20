@@ -20,6 +20,9 @@ export function AdminHeader() {
             <Link className="hover:text-[#0f172a]" href="/admin/firms">
               Firms
             </Link>
+            <Link className="hover:text-[#0f172a]" href="/admin/account">
+              Account
+            </Link>
           </nav>
         </div>
         <button

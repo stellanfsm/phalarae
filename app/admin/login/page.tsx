@@ -9,9 +9,9 @@ export default async function AdminLoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4">
       <div className="w-full max-w-md rounded-lg border border-[#e2e0d9] bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold text-[#0f172a]">Operator sign in</h1>
+        <h1 className="text-xl font-semibold text-[#0f172a]">Sign in</h1>
         <p className="mt-2 text-sm text-[#64748b]">
-          Phalerae lead dashboard. Use the demo credentials from the README after seeding.
+          Phalerae lead dashboard. Contact your administrator if you need access.
         </p>
         <div className="mt-6">
           <LoginForm />
