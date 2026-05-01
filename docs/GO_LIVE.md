@@ -7,9 +7,9 @@ This doc splits **what is implemented in this codebase** (or doable in Cursor on
 ## Done in the app (multi-tenant intake)
 
 - **Firm row in the database** drives intake: `slug`, `name`, `notificationEmail`, `disclaimerOverride`, `branding` JSON.
-- **`lib/firm-display.ts`** merges **`config/firm.ts`** (optional per-slug demo override) with **DB branding** so customers do not need a code change for logo, color, phones, greeting, disclaimer, display name.
+- **`lib/firm-display.ts`** resolves branding from the **Firm DB row** (`branding` JSON + `disclaimerOverride`) so customers do not need a code change for logo, color, phones, greeting, disclaimer, or display name.
 - **Intake + embed** (`/intake/[slug]`, `/embed?slug=…`) use that merge for UI copy and styling.
-- **API intake** uses the same resolution for opening messages, closing message, and **lead alert** recipient order: `config/firm.ts` `contactEmail` → `branding.contactEmail` → `Firm.notificationEmail` → `LEAD_ALERT_EMAIL` env.
+- **API intake** uses the same resolution for opening messages, closing message, and **lead alert** recipient order: `branding.contactEmail` → `Firm.notificationEmail` → `LEAD_ALERT_EMAIL` env.
 - **Admin**
   - **`/admin/firms`** — list firms (scoped: users with `AdminUser.firmId` see only their firm).
   - **`/admin/firms/[id]`** — edit firm name, alert email, disclaimer override, branding fields (slug read-only in UI).
@@ -49,7 +49,6 @@ This doc splits **what is implemented in this codebase** (or doable in Cursor on
 
 ### Optional code workflow (you / Cursor)
 
-- **`config/firm.ts`** — keep for **one** demo slug or a pilot with file-based overrides; production customers should rely on **admin + DB** so you do not ship config edits per firm.
 - **Seed / new firms** — `prisma/seed.ts` or SQL: create `Firm` + `AdminUser` with matching `firmId` for firm-only logins.
 
 ---

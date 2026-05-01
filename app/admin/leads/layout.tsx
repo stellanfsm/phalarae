@@ -1,15 +1,10 @@
 import { redirect } from "next/navigation";
-import { AdminHeader } from "@/components/admin/AdminHeader";
 import { getAdminContext } from "@/lib/admin-context";
+import { AdminShell } from "@/components/admin/AdminShell";
 
 export default async function LeadsLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getAdminContext();
   if (!ctx) redirect("/admin/login");
 
-  return (
-    <>
-      <AdminHeader />
-      <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
-    </>
-  );
+  return <AdminShell ctx={ctx}>{children}</AdminShell>;
 }

@@ -29,6 +29,127 @@ import { resolveFirmDisplay, resolveLeadAlertEmail } from "@/lib/firm-display";
 import { buildHumanSummary, buildSummaryJson } from "@/lib/summary";
 import { sendNewLeadAlert } from "@/lib/email";
 
+type CompletedLeadContext = {
+  leadId: string;
+  tag: ReturnType<typeof qualifyIntake>;
+  submittedAt: Date;
+};
+
+async function completeIntakeAndCreateLead(args: {
+  sessionId: string;
+  firmId: string;
+  firm: Firm;
+  mergedSessionData: object;
+  full: IntakePayload;
+  forceAcceptedFields: string[];
+  qualityRequiresReview: boolean;
+}): Promise<CompletedLeadContext> {
+  const intakeQuality =
+    args.forceAcceptedFields.length > 0
+      ? {
+          forceAcceptedFields: [...args.forceAcceptedFields],
+          notes: args.qualityRequiresReview
+            ? ["One or more answers were accepted after repeated clarification — please verify."]
+            : undefined,
+        }
+      : undefined;
+  const tag = qualifyIntake(args.full, {
+    qualityRequiresReview: args.qualityRequiresReview,
+  });
+  const now = new Date();
+  const summaryJson = buildSummaryJson(args.full, tag, now, intakeQuality);
+  const humanSummary = buildHumanSummary(args.full, tag, now, intakeQuality);
+  const closing = closingMessageForFirm(args.firm, {
+    urgentYes: args.full.urgent === "yes",
+  });
+
+  const [, lead] = await prisma.$transaction([
+    prisma.intakeSession.update({
+      where: { id: args.sessionId },
+      data: {
+        data: args.mergedSessionData,
+        currentStep: "complete",
+        completedAt: now,
+      },
+    }),
+    prisma.lead.create({
+      data: {
+        firmId: args.firmId,
+        intakeSessionId: args.sessionId,
+        qualificationTag: tag,
+        summaryJson: summaryJson as Prisma.InputJsonValue,
+        humanSummary,
+        contactName: args.full.fullName,
+        contactEmail: args.full.email,
+        contactPhone: args.full.phone,
+      },
+    }),
+    prisma.intakeMessage.create({
+      data: { sessionId: args.sessionId, role: "assistant", content: closing },
+    }),
+  ]);
+
+  return { leadId: lead.id, tag, submittedAt: now };
+}
+
+async function persistLeadAlertStatus(args: {
+  req: Request;
+  leadId: string;
+  firm: Firm;
+  tag: ReturnType<typeof qualifyIntake>;
+  full: IntakePayload;
+  submittedAt: Date;
+  legacyLogStyle?: boolean;
+}) {
+  const to =
+    resolveLeadAlertEmail(args.firm)?.trim() ||
+    process.env.LEAD_ALERT_EMAIL?.trim() ||
+    null;
+  const resolved = resolveFirmDisplay(args.firm);
+  let alertStatus = "no_recipient";
+  let alertError: string | undefined;
+
+  if (to) {
+    try {
+      const proto = args.req.headers.get("x-forwarded-proto") ?? "https";
+      const host = args.req.headers.get("host") ?? "";
+      const leadAdminUrl = host ? `${proto}://${host}/admin/leads/${args.leadId}` : null;
+      const emailResult = await sendNewLeadAlert({
+        to,
+        firmName: resolved.firmName,
+        qualificationTag: args.tag,
+        intake: args.full,
+        urgentSelfReported: args.full.urgent === "yes",
+        submittedAt: args.submittedAt,
+        leadAdminUrl,
+      });
+      alertStatus = emailResult.sent ? "sent" : "failed";
+      alertError = emailResult.error;
+    } catch (e) {
+      alertStatus = "failed";
+      alertError = e instanceof Error ? e.message : String(e);
+      if (args.legacyLogStyle) {
+        console.error("[email] sendNewLeadAlert threw for legacy lead", args.leadId, e);
+      } else {
+        console.error("[email] sendNewLeadAlert threw unexpectedly for lead", args.leadId, e);
+      }
+    }
+  }
+
+  try {
+    await prisma.lead.update({
+      where: { id: args.leadId },
+      data: { alertStatus, alertError: alertError ?? null },
+    });
+  } catch (e) {
+    if (args.legacyLogStyle) {
+      console.error("[email] failed to persist alertStatus for legacy lead", args.leadId, e);
+    } else {
+      console.error("[email] failed to persist alertStatus for lead", args.leadId, e);
+    }
+  }
+}
+
 function openingMessagesForFirm(firm: Firm) {
   const r = resolveFirmDisplay(firm);
 
@@ -299,44 +420,27 @@ export async function POST(req: Request) {
         return NextResponse.json({ sessionId: session.id, messages: msgs, currentStep: nextMissingLegacy, done: false, progress: intakeProgressLabel(legacyData), progressHints: intakeProgressHints(legacyData) }, { headers: rateLimitHeaders() });
       }
       const legacyFull = intakePayloadSchema.parse(legacyData);
-      const legacyQuality = legacyMeta.forceAcceptedFields.length > 0
-        ? { forceAcceptedFields: [...legacyMeta.forceAcceptedFields], notes: legacyMeta.qualityRequiresReview ? ["One or more answers were accepted after repeated clarification — please verify."] : undefined }
-        : undefined;
-      const legacyTag = qualifyIntake(legacyFull, { qualityRequiresReview: legacyMeta.qualityRequiresReview });
-      const legacyNow = new Date();
-      const legacySummaryJson = buildSummaryJson(legacyFull, legacyTag, legacyNow, legacyQuality);
-      const legacyHumanSummary = buildHumanSummary(legacyFull, legacyTag, legacyNow, legacyQuality);
-      const legacyResolved = resolveFirmDisplay(session.firm);
-      const legacyClosing = closingMessageForFirm(session.firm, { urgentYes: legacyFull.urgent === "yes" });
-      const [, legacyLead] = await prisma.$transaction([
-        prisma.intakeSession.update({ where: { id: session.id }, data: { data: mergeSessionStoredData(legacyData, legacyMeta) as object, currentStep: "complete", completedAt: legacyNow } }),
-        prisma.lead.create({ data: { firmId: session.firmId, intakeSessionId: session.id, qualificationTag: legacyTag, summaryJson: legacySummaryJson as Prisma.InputJsonValue, humanSummary: legacyHumanSummary, contactName: legacyFull.fullName, contactEmail: legacyFull.email, contactPhone: legacyFull.phone } }),
-        prisma.intakeMessage.create({ data: { sessionId: session.id, role: "assistant", content: legacyClosing } }),
-      ]);
-      const legacyTo = resolveLeadAlertEmail(session.firm)?.trim() || process.env.LEAD_ALERT_EMAIL?.trim() || null;
-      let legacyAlertStatus = "no_recipient";
-      let legacyAlertError: string | undefined;
-      if (legacyTo) {
-        try {
-          const legacyProto = req.headers.get("x-forwarded-proto") ?? "https";
-          const legacyHost = req.headers.get("host") ?? "";
-          const legacyLeadAdminUrl = legacyHost ? `${legacyProto}://${legacyHost}/admin/leads/${legacyLead.id}` : null;
-          const r = await sendNewLeadAlert({ to: legacyTo, firmName: legacyResolved.firmName, qualificationTag: legacyTag, intake: legacyFull, urgentSelfReported: legacyFull.urgent === "yes", submittedAt: legacyNow, leadAdminUrl: legacyLeadAdminUrl });
-          legacyAlertStatus = r.sent ? "sent" : "failed";
-          legacyAlertError = r.error;
-        } catch (e) {
-          legacyAlertStatus = "failed";
-          legacyAlertError = e instanceof Error ? e.message : String(e);
-          console.error("[email] sendNewLeadAlert threw for legacy lead", legacyLead.id, e);
-        }
-      }
-      try {
-        await prisma.lead.update({ where: { id: legacyLead.id }, data: { alertStatus: legacyAlertStatus, alertError: legacyAlertError ?? null } });
-      } catch (e) {
-        console.error("[email] failed to persist alertStatus for legacy lead", legacyLead.id, e);
-      }
+      const legacyMergedData = mergeSessionStoredData(legacyData, legacyMeta) as object;
+      const legacyCompleted = await completeIntakeAndCreateLead({
+        sessionId: session.id,
+        firmId: session.firmId,
+        firm: session.firm,
+        mergedSessionData: legacyMergedData,
+        full: legacyFull,
+        forceAcceptedFields: legacyMeta.forceAcceptedFields,
+        qualityRequiresReview: legacyMeta.qualityRequiresReview,
+      });
+      await persistLeadAlertStatus({
+        req,
+        leadId: legacyCompleted.leadId,
+        firm: session.firm,
+        tag: legacyCompleted.tag,
+        full: legacyFull,
+        submittedAt: legacyCompleted.submittedAt,
+        legacyLogStyle: true,
+      });
       const msgs = await prisma.intakeMessage.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: "asc" }, select: { role: true, content: true } });
-      return NextResponse.json({ sessionId: session.id, messages: msgs, currentStep: "complete", done: true, leadId: legacyLead.id, urgentSelfReported: legacyFull.urgent === "yes", progress: null, progressHints: [] }, { headers: rateLimitHeaders() });
+      return NextResponse.json({ sessionId: session.id, messages: msgs, currentStep: "complete", done: true, leadId: legacyCompleted.leadId, urgentSelfReported: legacyFull.urgent === "yes", progress: null, progressHints: [] }, { headers: rateLimitHeaders() });
     }
 
     if (!isFlowStepKey(step)) {
@@ -497,94 +601,25 @@ export async function POST(req: Request) {
       // Pure computation first — if any of this throws the session has not been sealed yet.
       const full = intakePayloadSchema.parse(nextData);
       submission = { urgentSelfReported: full.urgent === "yes" };
-      const intakeQuality =
-        sessionMeta.forceAcceptedFields.length > 0
-          ? {
-              forceAcceptedFields: [...sessionMeta.forceAcceptedFields],
-              notes: sessionMeta.qualityRequiresReview
-                ? ["One or more answers were accepted after repeated clarification — please verify."]
-                : undefined,
-            }
-          : undefined;
-      const tag = qualifyIntake(full, {
+      const mergedData = mergeSessionStoredData(nextData, sessionMeta) as object;
+      const completed = await completeIntakeAndCreateLead({
+        sessionId: session.id,
+        firmId: session.firmId,
+        firm: session.firm,
+        mergedSessionData: mergedData,
+        full,
+        forceAcceptedFields: sessionMeta.forceAcceptedFields,
         qualityRequiresReview: sessionMeta.qualityRequiresReview,
       });
-      const now = new Date();
-      const summaryJson = buildSummaryJson(full, tag, now, intakeQuality);
-      const humanSummary = buildHumanSummary(full, tag, now, intakeQuality);
-      const resolved = resolveFirmDisplay(session.firm);
-      const closing = closingMessageForFirm(session.firm, {
-        urgentYes: full.urgent === "yes",
+      leadId = completed.leadId;
+      await persistLeadAlertStatus({
+        req,
+        leadId: completed.leadId,
+        firm: session.firm,
+        tag: completed.tag,
+        full,
+        submittedAt: completed.submittedAt,
       });
-
-      // Atomic: session seal + lead row + closing message commit together or not at all.
-      // This prevents a zombie sealed session with no Lead if any write fails.
-      const [, lead] = await prisma.$transaction([
-        prisma.intakeSession.update({
-          where: { id: session.id },
-          data: {
-            data: mergeSessionStoredData(nextData, sessionMeta) as object,
-            currentStep: "complete",
-            completedAt: now,
-          },
-        }),
-        prisma.lead.create({
-          data: {
-            firmId: session.firmId,
-            intakeSessionId: session.id,
-            qualificationTag: tag,
-            summaryJson: summaryJson as Prisma.InputJsonValue,
-            humanSummary,
-            contactName: full.fullName,
-            contactEmail: full.email,
-            contactPhone: full.phone,
-          },
-        }),
-        prisma.intakeMessage.create({
-          data: { sessionId: session.id, role: "assistant", content: closing },
-        }),
-      ]);
-      leadId = lead.id;
-
-      const to =
-        resolveLeadAlertEmail(session.firm)?.trim() ||
-        process.env.LEAD_ALERT_EMAIL?.trim() ||
-        null;
-
-      let alertStatus = "no_recipient";
-      let alertError: string | undefined;
-
-      if (to) {
-        try {
-          const proto = req.headers.get("x-forwarded-proto") ?? "https";
-          const host = req.headers.get("host") ?? "";
-          const leadAdminUrl = host ? `${proto}://${host}/admin/leads/${lead.id}` : null;
-          const emailResult = await sendNewLeadAlert({
-            to,
-            firmName: resolved.firmName,
-            qualificationTag: tag,
-            intake: full,
-            urgentSelfReported: full.urgent === "yes",
-            submittedAt: now,
-            leadAdminUrl,
-          });
-          alertStatus = emailResult.sent ? "sent" : "failed";
-          alertError = emailResult.error;
-        } catch (e) {
-          alertStatus = "failed";
-          alertError = e instanceof Error ? e.message : String(e);
-          console.error("[email] sendNewLeadAlert threw unexpectedly for lead", lead.id, e);
-        }
-      }
-
-      try {
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: { alertStatus, alertError: alertError ?? null },
-        });
-      } catch (e) {
-        console.error("[email] failed to persist alertStatus for lead", lead.id, e);
-      }
     } else {
       await prisma.intakeSession.update({
         where: { id: session.id },

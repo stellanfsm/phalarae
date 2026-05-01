@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { updateFirmSettingsAction } from "@/app/admin/firms/actions";
 import type { FirmBrandingJson } from "@/lib/firm-display";
+import { FIRM_LEAD_ALERT_OVERRIDE_HELP, FIRM_LEAD_ALERT_PRIMARY_HELP } from "@/lib/lead-alert-status";
 
 type Props = {
   firmId: string;
@@ -79,7 +80,7 @@ export function FirmSettingsForm({
         <p className="mt-1 text-xs text-[#94a3b8]">Change slug via database / support if needed.</p>
       </div>
 
-      <div>
+      <div id="alert-settings">
         <label className="block text-xs font-medium uppercase tracking-wide text-[#64748b]">
           Lead alert email
         </label>
@@ -91,7 +92,7 @@ export function FirmSettingsForm({
           className="mt-1 w-full rounded-md border border-[#d1d5db] px-3 py-2 text-sm"
         />
         <p className="mt-1 text-xs text-[#94a3b8]">
-          Primary inbox for new lead notifications. Most firms only need this field.
+          {FIRM_LEAD_ALERT_PRIMARY_HELP}
         </p>
       </div>
 
@@ -194,7 +195,7 @@ export function FirmSettingsForm({
           className="mt-1 w-full rounded-md border border-[#d1d5db] px-3 py-2 text-sm"
         />
         <p className="mt-1 text-xs text-[#94a3b8]">
-          Leave empty unless you need alerts sent to a second address in addition to the primary above.
+          {FIRM_LEAD_ALERT_OVERRIDE_HELP}
         </p>
       </div>
 

@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Before making any non-trivial change, map the relevant flow end-to-end, list touched files, list adjacent risks, explain how the change fits the existing architecture, and explicitly say what must be tested so nothing else breaks.

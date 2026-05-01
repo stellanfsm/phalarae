@@ -1,81 +1,18 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAdminContext, requireFirmAccess } from "@/lib/admin-context";
+import { PageHeader } from "@/components/admin/PageHeader";
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { buildIntakeBriefParagraph, parseLeadSummaryJson } from "@/lib/summary";
 import type { IntakePayload } from "@/lib/schemas/intake-data";
 import { LeadWorkflowControl } from "@/components/admin/LeadWorkflowControl";
 import { LeadAssignControl } from "@/components/admin/LeadAssignControl";
 import { LeadNoteInput } from "@/components/admin/LeadNoteInput";
+import { normalizeLeadWorkflowStatus, type LeadWorkflowStatus } from "@/lib/lead-workflow";
+import { leadAlertReliabilityCallout, leadAlertTriageGuidance } from "@/lib/lead-alert-status";
 
 export const dynamic = "force-dynamic";
-
-function tagStyle(tag: string): string {
-  switch (tag) {
-    case "likely_relevant":
-      return "bg-emerald-50 text-emerald-900 ring-emerald-200";
-    case "needs_review":
-      return "bg-amber-50 text-amber-900 ring-amber-200";
-    case "low_relevance":
-      return "bg-slate-100 text-slate-700 ring-slate-200";
-    default:
-      return "bg-slate-50 text-slate-700 ring-slate-200";
-  }
-}
-
-function tagLabel(tag: string): string {
-  switch (tag) {
-    case "likely_relevant":
-      return "Likely relevant";
-    case "needs_review":
-      return "Needs review";
-    case "low_relevance":
-      return "Low relevance";
-    default:
-      return tag;
-  }
-}
-
-type WorkflowStatus = "new" | "open" | "contacted" | "archived";
-
-function workflowStatusStyle(status: string): string {
-  switch (status) {
-    case "new": return "bg-amber-50 text-amber-800 ring-amber-200";
-    case "open": return "bg-slate-100 text-slate-600 ring-slate-200";
-    case "contacted": return "bg-blue-50 text-blue-800 ring-blue-200";
-    case "archived": return "bg-slate-100 text-slate-500 ring-slate-200";
-    default: return "bg-slate-50 text-slate-600 ring-slate-200";
-  }
-}
-
-function workflowStatusLabel(status: string): string {
-  switch (status) {
-    case "new": return "New";
-    case "open": return "Open";
-    case "contacted": return "Contacted";
-    case "archived": return "Archived";
-    default: return status;
-  }
-}
-
-function alertStatusStyle(status: string): string {
-  switch (status) {
-    case "sent": return "bg-emerald-50 text-emerald-900 ring-emerald-200";
-    case "failed": return "bg-red-50 text-red-900 ring-red-200";
-    case "no_recipient": return "bg-slate-100 text-slate-600 ring-slate-200";
-    default: return "bg-slate-50 text-slate-600 ring-slate-200";
-  }
-}
-
-function alertStatusLabel(status: string): string {
-  switch (status) {
-    case "sent": return "Alert sent";
-    case "failed": return "Alert failed";
-    case "no_recipient": return "No recipient configured";
-    default: return status;
-  }
-}
 
 function triStateDisplay(val: string | undefined): string {
   switch (val) {
@@ -141,6 +78,23 @@ type NoteWithAuthor = {
 
 type FirmUser = { id: string; name: string | null; email: string };
 
+function nextStepGuidance(status: LeadWorkflowStatus, hasAssignee: boolean): string {
+  if (status === "open" && !hasAssignee) return "Assign an owner, then continue triage.";
+  if (status === "open") return "Review details and decide whether to contact or archive.";
+  if (status === "contacted") return "Capture outreach outcome and either keep active or archive.";
+  if (status === "archived") return "Lead is closed. Re-open only if follow-up becomes necessary.";
+  return "Review this lead and set workflow state.";
+}
+
+function alertGuidance(alertStatus: string): string {
+  return leadAlertTriageGuidance(alertStatus);
+}
+
+function formatDateTime(value: Date | null | undefined): string {
+  if (!value) return "—";
+  return value.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+}
+
 export default async function AdminLeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await getAdminContext();
@@ -177,69 +131,144 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
     });
     (lead as { workflowStatus?: string }).workflowStatus = "open";
   }
-  const effectiveStatus = ((lead as { workflowStatus?: string }).workflowStatus ?? "open") as WorkflowStatus;
+  const effectiveStatus: LeadWorkflowStatus = normalizeLeadWorkflowStatus(
+    (lead as { workflowStatus?: string }).workflowStatus,
+  );
 
   const jsonPretty = JSON.stringify(lead.summaryJson, null, 2);
   const parsed = parseLeadSummaryJson(lead.summaryJson);
   const intake = parsed?.intake ?? null;
   const brief = intake != null ? buildIntakeBriefParagraph(intake, parsed!.qualificationTag) : null;
   const qualityFlags = parsed?.intakeQuality;
+  const hasAssignee = currentAssigneeId !== null;
+  const submittedAtText = lead.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  const reviewedAt = (lead as { reviewedAt?: Date | null }).reviewedAt ?? null;
+  const assignedAt = (lead as { assignedAt?: Date | null }).assignedAt ?? null;
+  const assignee = (lead as { assignedTo?: { name: string | null; email: string } | null }).assignedTo ?? null;
+  const assigneeLabel = assignee ? (assignee.name ?? assignee.email) : "Unassigned";
+  const latestNote = notes.length > 0 ? notes[notes.length - 1] : null;
+  const alertReliabilityLine = leadAlertReliabilityCallout(lead.alertStatus);
 
   return (
     <div>
-      <Link
-        href="/admin/leads"
-        className="text-sm text-[#64748b] underline-offset-4 hover:text-[#0f172a] hover:underline"
-      >
-        ← Back to leads
-      </Link>
+      <PageHeader
+        title={lead.contactName ?? "Lead detail"}
+        backHref="/admin/leads"
+        backLabel="Leads"
+      />
 
-      {/* Header */}
-      <div className="mt-4 flex flex-wrap items-start gap-3 sm:items-center">
-        <h1 className="font-serif text-2xl font-semibold text-[#0f172a]">
-          {lead.contactName ?? "Lead detail"}
-        </h1>
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${tagStyle(lead.qualificationTag)}`}
-        >
-          {tagLabel(lead.qualificationTag)}
-        </span>
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${alertStatusStyle(lead.alertStatus)}`}
-          title={lead.alertError ?? undefined}
-        >
-          {alertStatusLabel(lead.alertStatus)}
-        </span>
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${workflowStatusStyle(effectiveStatus)}`}
-        >
-          {workflowStatusLabel(effectiveStatus)}
-        </span>
+      {/* Status badges row */}
+      <div className="-mt-4 mb-4 flex flex-wrap items-center gap-2">
+        <StatusBadge variant="qualification" value={lead.qualificationTag} />
+        <StatusBadge variant="alert" value={lead.alertStatus} title={lead.alertError ?? undefined} />
+        <StatusBadge variant="workflow" value={effectiveStatus} />
       </div>
-      <p className="mt-1 text-sm text-[#64748b]">
-        Submitted {lead.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} · {lead.firm.name}
-      </p>
-      {lead.alertError ? (
-        <p className="mt-1 text-xs text-red-500" title={lead.alertError}>
-          Alert error: {lead.alertError.length > 140 ? lead.alertError.slice(0, 140) + "…" : lead.alertError}
-        </p>
-      ) : null}
 
-      {/* Brief summary */}
-      {brief ? (
-        <p className="mt-4 max-w-3xl border-l-2 border-[#cbd5e1] pl-4 text-sm leading-relaxed text-[#334155]">
-          {brief}
-        </p>
-      ) : null}
+      <div className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Triage context</h2>
+          <p className="mt-2 text-sm text-[#475569]">
+            Submitted {submittedAtText} · {lead.firm.name}
+          </p>
+          {brief ? (
+            <p className="mt-3 border-l-2 border-[#cbd5e1] pl-4 text-sm leading-relaxed text-[#334155]">
+              {brief}
+            </p>
+          ) : null}
+          <p className="mt-3 text-xs text-[#64748b]">{alertGuidance(lead.alertStatus)}</p>
+          {lead.alertError ? (
+            <p className="mt-1 text-xs text-red-500" title={lead.alertError}>
+              Lead alert error: {lead.alertError.length > 140 ? lead.alertError.slice(0, 140) + "…" : lead.alertError}
+            </p>
+          ) : null}
+          {(lead.alertStatus === "failed" || lead.alertStatus === "no_recipient") ? (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-xs text-amber-900">
+                <span className="font-medium">Lead alert reliability needs attention.</span>
+                {alertReliabilityLine ? <> {alertReliabilityLine}</> : null}
+                {ctx.role !== "firm_staff" ? (
+                  <>
+                    {" "}
+                    <a
+                      href={`/admin/firms/${lead.firmId}#alert-settings`}
+                      className="font-medium underline underline-offset-2 hover:no-underline"
+                    >
+                      Open lead alert settings →
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            </div>
+          ) : null}
+        </section>
 
-      <div className="mt-6 max-w-sm space-y-3">
-        <LeadWorkflowControl leadId={lead.id} currentStatus={effectiveStatus} />
-        <LeadAssignControl
-          leadId={lead.id}
-          currentAssigneeId={currentAssigneeId}
-          firmUsers={firmUsers}
-        />
+        <section className="rounded-lg border border-[#e2e0d9] bg-white p-4 shadow-sm">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Triage actions now</h2>
+          <p className="mt-2 text-sm text-[#334155]">{nextStepGuidance(effectiveStatus, hasAssignee)}</p>
+          <div className="mt-3 space-y-3">
+            <LeadWorkflowControl leadId={lead.id} currentStatus={effectiveStatus} />
+            <LeadAssignControl
+              leadId={lead.id}
+              currentAssigneeId={currentAssigneeId}
+              firmUsers={firmUsers}
+            />
+          </div>
+        </section>
       </div>
+
+      <section className="rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Handling timeline</h2>
+        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-[#94a3b8]">Submitted</dt>
+            <dd className="mt-0.5 text-[#334155]">{submittedAtText}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-[#94a3b8]">First reviewed</dt>
+            <dd className="mt-0.5 text-[#334155]">{formatDateTime(reviewedAt)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-[#94a3b8]">Current assignee</dt>
+            <dd className="mt-0.5 text-[#334155]">{assigneeLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-[#94a3b8]">Assigned at</dt>
+            <dd className="mt-0.5 text-[#334155]">{formatDateTime(assignedAt)}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-xs uppercase tracking-wide text-[#94a3b8]">Latest note activity</dt>
+            <dd className="mt-0.5 text-[#334155]">
+              {latestNote
+                ? `${latestNote.author.name ?? latestNote.author.email} · ${latestNote.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+                : "No notes yet"}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      {/* Notes */}
+      <section className="mt-6 rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Notes</h2>
+        {notes.length === 0 ? (
+          <p className="mt-3 text-sm text-[#94a3b8]">No notes yet.</p>
+        ) : (
+          <div className="mt-3 divide-y divide-[#f1f0eb]">
+            {notes.map((note) => (
+              <div key={note.id} className="py-3 first:pt-0">
+                <p className="text-xs text-[#64748b]">
+                  <span className="font-medium text-[#334155]">
+                    {note.author.name ?? note.author.email}
+                  </span>
+                  {" · "}
+                  {note.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-[#334155]">{note.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        <LeadNoteInput leadId={lead.id} />
+      </section>
 
       {intake != null ? (
         <>
@@ -323,30 +352,6 @@ export default async function AdminLeadDetailPage({ params }: { params: Promise<
           </pre>
         </section>
       )}
-
-      {/* Notes */}
-      <section className="mt-6 rounded-lg border border-[#e2e0d9] bg-white p-5 shadow-sm">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Notes</h2>
-        {notes.length === 0 ? (
-          <p className="mt-3 text-sm text-[#94a3b8]">No notes yet.</p>
-        ) : (
-          <div className="mt-3 divide-y divide-[#f1f0eb]">
-            {notes.map((note) => (
-              <div key={note.id} className="py-3 first:pt-0">
-                <p className="text-xs text-[#64748b]">
-                  <span className="font-medium text-[#334155]">
-                    {note.author.name ?? note.author.email}
-                  </span>
-                  {" · "}
-                  {note.createdAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-[#334155]">{note.content}</p>
-              </div>
-            ))}
-          </div>
-        )}
-        <LeadNoteInput leadId={lead.id} />
-      </section>
 
       {/* Raw data — collapsed by default */}
       <details className="mt-6">

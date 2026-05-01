@@ -20,7 +20,7 @@ export type FirmReadiness = {
 export const BLOCKER_LABELS: Record<ReadinessBlocker, { label: string; hint: string }> = {
   no_notification_email: {
     label: "Lead alert email configured",
-    hint: "No notification email is set — new leads will be saved but the firm will not receive alerts.",
+    hint: "No lead alert email or branding override is set — completed intakes still create leads, but new-lead emails may not send (lead alert can show No recipient).",
   },
   no_active_firm_admin: {
     label: "At least one active firm admin",

@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAdminContext, requireFirmAccess } from "@/lib/admin-context";
 import { InviteForm } from "@/components/admin/InviteForm";
 import { UserManagementButtons } from "@/components/admin/UserManagementButtons";
+import { PageHeader } from "@/components/admin/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -59,13 +59,12 @@ export default async function FirmUsersPage({
 
   return (
     <div>
-      <p className="text-sm text-[#64748b]">
-        <Link href={`/admin/firms/${id}`} className="text-[#0f172a] underline hover:no-underline">
-          ← {firm.name}
-        </Link>
-      </p>
-      <h1 className="mt-4 font-serif text-2xl font-semibold text-[#0f172a]">Users</h1>
-      <p className="mt-0.5 text-xs text-[#94a3b8]">{firm.name}</p>
+      <PageHeader
+        title="Users"
+        subtitle={firm.name}
+        backHref={`/admin/firms/${id}`}
+        backLabel={firm.name}
+      />
 
       <div className="mt-8 max-w-xl rounded-lg border border-[#e2e0d9] bg-white p-6 shadow-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-[#64748b]">

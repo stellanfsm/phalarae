@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getAdminContext, requireFirmAccess } from "@/lib/admin-context";
+import { LEAD_WORKFLOW_STATUSES } from "@/lib/lead-workflow";
 
-const VALID_STATUSES = ["new", "open", "contacted", "archived"] as const;
+const VALID_STATUSES = LEAD_WORKFLOW_STATUSES;
 
 export async function setLeadWorkflowStatusAction(
   leadId: string,

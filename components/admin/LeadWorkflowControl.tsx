@@ -2,10 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { setLeadWorkflowStatusAction } from "@/app/admin/leads/[id]/actions";
+import { type LeadWorkflowStatus } from "@/lib/lead-workflow";
 
-type WorkflowStatus = "new" | "open" | "contacted" | "archived";
-
-const STATUS_CONFIG: Record<WorkflowStatus, { label: string; description: string }> = {
+const STATUS_CONFIG: Record<LeadWorkflowStatus, { label: string; description: string }> = {
   new: {
     label: "New",
     description: "Not yet reviewed.",
@@ -29,19 +28,19 @@ const STATUS_CONFIG: Record<WorkflowStatus, { label: string; description: string
  * "new" is intentionally omitted — leads auto-transition to "open" on first view.
  * Users never manually set a lead back to new.
  */
-const VISIBLE_STATUSES: WorkflowStatus[] = ["open", "contacted", "archived"];
+const VISIBLE_STATUSES: LeadWorkflowStatus[] = ["open", "contacted", "archived"];
 
 export function LeadWorkflowControl({
   leadId,
   currentStatus,
 }: {
   leadId: string;
-  currentStatus: WorkflowStatus;
+  currentStatus: LeadWorkflowStatus;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function handleSetStatus(next: WorkflowStatus) {
+  function handleSetStatus(next: LeadWorkflowStatus) {
     if (next === currentStatus) return;
     setError(null);
     startTransition(async () => {

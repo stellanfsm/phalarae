@@ -57,6 +57,17 @@ export function FirmReadinessPanel({ firmId, readiness, firmStatus }: Props) {
                         </Link>
                       </>
                     )}
+                    {blocker === "no_notification_email" && (
+                      <>
+                        {" "}
+                        <Link
+                          href="#alert-settings"
+                          className="underline underline-offset-2 hover:text-[#0f172a]"
+                        >
+                          Configure lead alert email →
+                        </Link>
+                      </>
+                    )}
                   </p>
                 )}
               </div>
